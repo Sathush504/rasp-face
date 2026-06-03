@@ -37,7 +37,7 @@ BLYNK_MQTT_PORT = 8883                    # TLS
 BLYNK_MQTT_KEEPALIVE = 45
 
 _DOWNLINK_PREFIX = "downlink/ds/"   # App → Device messages
-_UPLINK_PREFIX = "uplink/ds/"       # Device → App messages
+_UPLINK_PREFIX = "ds/"              # Device → App messages
 
 
 # ---------------------------------------------------------------------------
@@ -200,7 +200,8 @@ class BlynkBridge:
         if not self._connected or self._client is None:
             return
         topic = f"{_UPLINK_PREFIX}V{vpin}"
-        payload = json.dumps(value)
+        # Blynk ds/ topics require raw string values, not JSON (which adds quotes to strings)
+        payload = str(value)
         try:
             self._client.publish(topic, payload, qos=1)
         except Exception as exc:
