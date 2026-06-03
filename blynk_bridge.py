@@ -5,10 +5,10 @@ Uses the official paho-mqtt library to communicate with the Blynk Cloud
 MQTT broker (recommended approach for Python in 2024+).
 
 Virtual Pin Layout (configure matching Datastreams in Blynk Console):
-  V1  — Button (0/1): remote unlock trigger
-  V2  — LED   (0/1): current lock state feedback
-  V3  — Terminal: recent access log stream
-  V4  — Label  : last authorised user name
+  V0  — Button (0/1): remote unlock trigger
+  V1  — LED   (0/1): current lock state feedback
+  V2  — Terminal: recent access log stream
+  V3  — Label  : last authorised user name
 
 Runs in its own daemon thread so it never blocks the GUI or recognizer.
 """
@@ -32,8 +32,8 @@ except ImportError:
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
-BLYNK_MQTT_BROKER = "blynk.cloud"
-BLYNK_MQTT_PORT = 8883          # TLS
+BLYNK_MQTT_BROKER = "sgp1.blynk.cloud"   # SGP1 = Singapore region (match your account)
+BLYNK_MQTT_PORT = 8883                    # TLS
 BLYNK_MQTT_KEEPALIVE = 45
 
 _DOWNLINK_PREFIX = "downlink/ds/"   # App → Device messages
@@ -63,10 +63,10 @@ class BlynkBridge:
         self,
         auth_token: str,
         on_remote_unlock: Callable[[], None],
-        vpin_unlock: int = 1,
-        vpin_status: int = 2,
-        vpin_log: int = 3,
-        vpin_last_user: int = 4,
+        vpin_unlock: int = 0,
+        vpin_status: int = 1,
+        vpin_log: int = 2,
+        vpin_last_user: int = 3,
     ):
         self._auth = auth_token
         self._on_remote_unlock = on_remote_unlock
@@ -136,12 +136,15 @@ class BlynkBridge:
                 backoff = min(backoff * 2, 120)
 
     def _connect(self) -> None:
+        # Client ID can be any string, using a descriptive client ID containing the token or a random suffix
+        client_id = f"rasp_face_{self._auth[:6]}"
         client = mqtt.Client(
-            client_id=self._auth,
+            client_id=client_id,
             protocol=mqtt.MQTTv311,
             clean_session=True
         )
-        client.username_pw_set(username=self._auth, password=self._auth)
+        # For Blynk, username is always "device", password is the Auth Token
+        client.username_pw_set(username="device", password=self._auth)
         client.tls_set()            # use system CA bundle
 
         client.on_connect = self._on_connect
