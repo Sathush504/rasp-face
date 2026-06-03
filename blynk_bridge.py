@@ -17,7 +17,7 @@ import json
 import logging
 import threading
 import time
-from typing import Callable, Optional
+from typing import Callable, Optional, Union
 
 logger = logging.getLogger(__name__)
 
@@ -63,10 +63,10 @@ class BlynkBridge:
         self,
         auth_token: str,
         on_remote_unlock: Callable[[], None],
-        vpin_unlock: int = 0,
-        vpin_status: int = 1,
-        vpin_log: int = 2,
-        vpin_last_user: int = 3,
+        vpin_unlock: Union[int, str] = 0,
+        vpin_status: Union[int, str] = 1,
+        vpin_log: Union[int, str] = 2,
+        vpin_last_user: Union[int, str] = 3,
     ):
         self._auth = auth_token
         self._on_remote_unlock = on_remote_unlock
@@ -176,33 +176,51 @@ class BlynkBridge:
             payload = msg.payload.decode("utf-8")
         except Exception:
             return
+        
+        logger.info("Received MQTT message on topic: %s | Payload: %s", topic, payload)
 
-        # Topic format: downlink/ds/V<pin>
+        # Topic format: downlink/ds/{datastream_name}
         if topic.startswith(_DOWNLINK_PREFIX):
-            vpin_str = topic[len(_DOWNLINK_PREFIX):]
-            try:
-                vpin = int(vpin_str.lstrip("Vv"))
-            except ValueError:
-                return
+            ds_str = topic[len(_DOWNLINK_PREFIX):]
+            logger.debug("Blynk ↓ %s = %s", ds_str, payload)
 
-            logger.debug("Blynk ↓ V%d = %s", vpin, payload)
-
-            if vpin == self._vpin_unlock:
+            # Determine if the incoming datastream matches our unlock trigger
+            is_match = False
+            if isinstance(self._vpin_unlock, int):
                 try:
-                    value = json.loads(payload)
-                    if int(value) == 1:
-                        logger.info("Remote UNLOCK triggered via Blynk V%d.", vpin)
+                    is_match = (int(ds_str.lstrip("Vv")) == self._vpin_unlock)
+                except ValueError:
+                    pass
+            else:
+                # Direct string match (case-insensitive and stripping "V" if needed)
+                is_match = (
+                    ds_str.lower() == self._vpin_unlock.lower() or
+                    ds_str.lstrip("Vv").lower() == self._vpin_unlock.lstrip("Vv").lower()
+                )
+
+            if is_match:
+                try:
+                    # Payload is typically raw text "1" or "0"
+                    val_int = int(float(payload))
+                    if val_int == 1:
+                        logger.info("Remote UNLOCK triggered via Blynk '%s'.", ds_str)
                         self._on_remote_unlock()
                 except Exception as exc:
                     logger.warning("Malformed unlock payload: %s — %s", payload, exc)
 
-    def _publish_vpin(self, vpin: int, value) -> None:
+    def _publish_vpin(self, vpin, value) -> None:
         if not self._connected or self._client is None:
             return
-        topic = f"{_UPLINK_PREFIX}V{vpin}"
+        
+        # Determine topic name based on type of vpin
+        if isinstance(vpin, int):
+            topic = f"{_UPLINK_PREFIX}V{vpin}"
+        else:
+            topic = f"{_UPLINK_PREFIX}{vpin}"
+
         # Blynk ds/ topics require raw string values, not JSON (which adds quotes to strings)
         payload = str(value)
         try:
             self._client.publish(topic, payload, qos=1)
         except Exception as exc:
-            logger.warning("Failed to publish V%d: %s", vpin, exc)
+            logger.warning("Failed to publish V%d: %s" if isinstance(vpin, int) else "Failed to publish %s: %s", vpin, exc)
