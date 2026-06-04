@@ -22,6 +22,9 @@ import os
 import sys
 import threading
 import tkinter as tk
+import http.server
+import socketserver
+import time
 from tkinter import font as tkfont
 from tkinter import messagebox, simpledialog, ttk
 from typing import Optional
@@ -65,6 +68,61 @@ logging.basicConfig(
     handlers=[logging.StreamHandler(sys.stdout)],
 )
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# MJPEG Streaming Server for Blynk App / External Viewers
+# ---------------------------------------------------------------------------
+STREAM_PORT = 8090
+latest_frame_jpeg = None
+latest_frame_lock = threading.Lock()
+
+def set_latest_frame(frame):
+    global latest_frame_jpeg
+    if frame is None:
+        return
+    ret, jpeg = cv2.imencode(".jpg", frame)
+    if ret:
+        with latest_frame_lock:
+            latest_frame_jpeg = jpeg.tobytes()
+
+class MJPEGStreamingHandler(http.server.BaseHTTPRequestHandler):
+    def log_message(self, format, *args):
+        pass  # Silence HTTP logs to prevent console spam
+
+    def do_GET(self):
+        if self.path == "/stream.mjpg":
+            self.send_response(200)
+            self.send_header("Age", "0")
+            self.send_header("Cache-Control", "no-cache, private")
+            self.send_header("Pragma", "no-cache")
+            self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=frame")
+            self.end_headers()
+            try:
+                while True:
+                    with latest_frame_lock:
+                        frame = latest_frame_jpeg
+                    if frame is None:
+                        time.sleep(0.03)
+                        continue
+                    self.wfile.write(b"--frame\r\n")
+                    self.send_header("Content-Type", "image/jpeg")
+                    self.send_header("Content-Length", str(len(frame)))
+                    self.end_headers()
+                    self.wfile.write(frame)
+                    self.wfile.write(b"\r\n")
+                    time.sleep(0.07)  # limit stream to ~15 FPS
+            except Exception:
+                pass
+        else:
+            self.send_response(404)
+            self.end_headers()
+
+def start_streaming_server():
+    socketserver.TCPServer.allow_reuse_address = True
+    server = socketserver.TCPServer(("", STREAM_PORT), MJPEGStreamingHandler)
+    t = threading.Thread(target=server.serve_forever, daemon=True)
+    t.start()
+    logger.info("MJPEG Cam Stream Server started on port %d", STREAM_PORT)
 
 
 # ---------------------------------------------------------------------------
@@ -124,6 +182,8 @@ class FaceUnlockApp:
         self._camera_ok = self._cap.isOpened()
         if not self._camera_ok:
             logger.warning("Camera index %d not available.", CAMERA_INDEX)
+        else:
+            start_streaming_server()
 
         # ------------------------------------------------------------------
         # Enrollment session state
@@ -353,6 +413,7 @@ class FaceUnlockApp:
                 self._door.unlock(triggered_by=event.name or "face")
 
         self._render_frame(bgr)
+        set_latest_frame(bgr)
         self.window.after(VIDEO_LOOP_MS, self._poll_camera)
 
     def _draw_overlays(self, frame, boxes, labels) -> None:
