@@ -144,7 +144,9 @@ class FaceRecognizer:
                     if event:
                         auth_event = event
                 else:
-                    self._handle_unknown_face()
+                    event = self._handle_unknown_face()
+                    if event:
+                        auth_event = event
 
             return face_boxes, face_labels, auth_event
 
@@ -194,13 +196,33 @@ class FaceRecognizer:
         self._dispatch(event)
         return event
 
-    def _handle_unknown_face(self) -> None:
+    def _handle_unknown_face(self) -> Optional[RecognitionEvent]:
+        with self._lock:
+            self._match_counter["Unknown"] = self._match_counter.get("Unknown", 0) + 1
+            count = self._match_counter["Unknown"]
+
+        if count < self._confirm_frames:
+            return None
+
+        # Reset counter
+        with self._lock:
+            self._match_counter["Unknown"] = 0
+
+        # Cooldown check for unknown event (15 seconds)
+        now = datetime.datetime.now()
+        with self._lock:
+            last = self._last_unlock_time.get("Unknown")
+            if last and (now - last).total_seconds() < 15.0:
+                return None
+            self._last_unlock_time["Unknown"] = now
+
         event = RecognitionEvent(
-            timestamp=datetime.datetime.now(),
+            timestamp=now,
             result=AuthResult.UNKNOWN,
             face_count=1
         )
         self._dispatch(event)
+        return event
 
     def _decay_counters(self) -> None:
         """Gradually reduce match counters when no face is visible."""

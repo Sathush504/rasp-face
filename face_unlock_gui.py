@@ -583,6 +583,14 @@ class FaceUnlockApp:
                 "ACCESS_GRANTED", name=event.name,
                 confidence=event.confidence, source="face"
             )
+        elif event.result == AuthResult.UNKNOWN:
+            msg = f"[{ts}] ✗ ALERT: Unknown person detected!"
+            self._append_log(msg, tag="alert")
+            self._update_status_bar("Unknown face detected!")
+            self._blynk.send_access_event(msg)
+            self._access_log.log_event(
+                "UNAUTHORIZED_ACCESS", source="face"
+            )
 
     # -----------------------------------------------------------------------
     # Lock state callback (from DoorLock — may be any thread)

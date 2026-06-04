@@ -103,8 +103,8 @@ class BlynkBridge:
         self._publish_vpin(self._vpin_status, 1 if is_unlocked else 0)
 
     def send_access_event(self, message: str) -> None:
-        """Append a line to the Blynk Terminal widget (V3)."""
-        self._publish_vpin(self._vpin_log, message)
+        """Append a line to the Blynk Terminal widget (V2)."""
+        self._publish_vpin(self._vpin_log, message + "\n")
 
     def update_last_user(self, name: str) -> None:
         """Update the last-user label widget (V4)."""
