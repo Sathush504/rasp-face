@@ -53,6 +53,8 @@ from config import (
     VPIN_LAST_USER,
     VPIN_STATUS_LED,
     VPIN_UNLOCK_BUTTON,
+    USER_SCHEDULES,
+    FALLBACK_PIN,
 )
 from database import FaceDatabase
 from enroller import EnrollmentSession
@@ -193,6 +195,7 @@ class FaceUnlockApp:
         self._enroll_session: Optional[EnrollmentSession] = None
         self._enroll_overlay_active = False
         self._enroll_is_remote = False
+        self._last_bgr = None
 
         # ------------------------------------------------------------------
         # Build UI
@@ -404,6 +407,7 @@ class FaceUnlockApp:
             return
 
         bgr = cv2.flip(bgr, 1)      # mirror effect
+        self._last_bgr = bgr.copy()  # Save for snapshot purposes
 
         # Enrollment mode intercept
         if self._enroll_session is not None:
@@ -412,8 +416,6 @@ class FaceUnlockApp:
             # Recognition mode
             boxes, labels, event = self._recognizer.process_frame(bgr)
             self._draw_overlays(bgr, boxes, labels)
-            if event and event.result == AuthResult.AUTHORIZED:
-                self._door.unlock(triggered_by=event.name or "face")
 
         self._render_frame(bgr)
         set_latest_frame(bgr)
@@ -587,7 +589,8 @@ class FaceUnlockApp:
                 "  unlock      - Open door\n"
                 "  lock        - Secure door\n"
                 "  enroll:Name - Enroll face\n"
-                "  remove:Name - Delete user"
+                "  remove:Name - Delete user\n"
+                "  pin:XXXX    - Fallback PIN unlock"
             )
             self._blynk.send_access_event(help_msg)
 
@@ -669,6 +672,17 @@ class FaceUnlockApp:
                 else:
                     self._blynk.send_access_event(f"[{ts}] ✗ Error: User '{remove_name}' not found.")
 
+        elif cmd.startswith("pin:"):
+            pin_code = cmd_text[4:].strip()
+            if pin_code == FALLBACK_PIN:
+                self._door.unlock(triggered_by="blynk_pin_fallback")
+                self._access_log.log_event("PIN_UNLOCK", source="blynk")
+                self._append_log("Door unlocked via fallback PIN", tag="blynk")
+                self._update_status_bar("Door unlocked via fallback PIN")
+                self._blynk.send_access_event(f"[{ts}] ✓ UNLOCKED: Fallback PIN")
+            else:
+                self._blynk.send_access_event(f"[{ts}] ✗ Error: Invalid PIN.")
+
         else:
             self._blynk.send_access_event(f"[{ts}] Unknown command. Type 'help' for commands.")
 
@@ -699,6 +713,28 @@ class FaceUnlockApp:
     def _process_recognition_event(self, event: RecognitionEvent) -> None:
         ts = event.timestamp.strftime("%H:%M:%S")
         if event.result == AuthResult.AUTHORIZED:
+            # Check user schedule
+            if event.name in USER_SCHEDULES:
+                allowed_start_str, allowed_end_str = USER_SCHEDULES[event.name]
+                now_time = datetime.datetime.now().time()
+                try:
+                    start_time = datetime.datetime.strptime(allowed_start_str, "%H:%M").time()
+                    end_time = datetime.datetime.strptime(allowed_end_str, "%H:%M").time()
+                    
+                    if not (start_time <= now_time <= end_time):
+                        msg = f"[{ts}] ✗ DENIED: {event.name} (Outside allowed schedule {allowed_start_str}-{allowed_end_str})"
+                        self._append_log(msg, tag="alert")
+                        self._update_status_bar(f"Access denied: {event.name} (restricted hours)")
+                        self._blynk.send_access_event(msg)
+                        self._access_log.log_event(
+                            "ACCESS_DENIED", name=event.name,
+                            confidence=event.confidence, source="face",
+                            extra={"reason": "outside_schedule"}
+                        )
+                        return
+                except Exception as exc:
+                    logger.error("Error parsing user schedule for %s: %s", event.name, exc)
+
             msg = f"[{ts}] ✓ ACCESS: {event.name} ({event.confidence:.0%})"
             self._append_log(msg, tag="grant")
             self._update_status_bar(f"Access granted → {event.name}")
@@ -708,13 +744,28 @@ class FaceUnlockApp:
                 "ACCESS_GRANTED", name=event.name,
                 confidence=event.confidence, source="face"
             )
+            # Unlock physical lock
+            self._door.unlock(triggered_by=event.name or "face")
+
         elif event.result == AuthResult.UNKNOWN:
             msg = f"[{ts}] ✗ ALERT: Unknown person detected!"
             self._append_log(msg, tag="alert")
             self._update_status_bar("Unknown face detected!")
             self._blynk.send_access_event(msg)
+            
+            # Save snapshot of the intruder
+            intruders_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "intruders")
+            os.makedirs(intruders_dir, exist_ok=True)
+            timestamp_str = event.timestamp.strftime("%Y%m%d_%H%M%S")
+            filename = f"intruder_{timestamp_str}.jpg"
+            filepath = os.path.join(intruders_dir, filename)
+            if hasattr(self, "_last_bgr") and self._last_bgr is not None:
+                cv2.imwrite(filepath, self._last_bgr)
+                logger.info("Saved intruder snapshot to %s", filepath)
+            
             self._access_log.log_event(
-                "UNAUTHORIZED_ACCESS", source="face"
+                "UNAUTHORIZED_ACCESS", source="face",
+                extra={"snapshot": filename}
             )
             self._blynk.trigger_event("unauthorized_access")
 

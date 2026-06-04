@@ -71,3 +71,9 @@ LOG_BACKUP_COUNT = 3
 # ---------------------------------------------------------------------------
 MAX_ENROLLMENT_SAMPLES = 10   # hard cap on encodings stored per person
 ADMIN_PIN = os.getenv("ADMIN_PIN", "1234")   # PIN to protect admin actions in GUI
+FALLBACK_PIN = os.getenv("FALLBACK_PIN", "9999")  # Fallback PIN to unlock via Blynk terminal
+# Access schedules format: {"Name": ("Start_HH:MM", "End_HH:MM")}
+# If a person is not in this dictionary, they have 24/7 access.
+USER_SCHEDULES = {
+    "Guest": ("09:00", "17:00")
+}

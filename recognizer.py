@@ -70,6 +70,8 @@ class FaceRecognizer:
         # Consecutive-match tracking
         self._match_counter: Dict[str, int] = {}
         self._last_unlock_time: Dict[str, datetime.datetime] = {}
+        self._blink_state: Dict[str, str] = {}
+        self._blink_counted: Dict[str, bool] = {}
 
         # Registered callbacks
         self._event_callbacks: List[Callable[[RecognitionEvent], None]] = []
@@ -111,6 +113,8 @@ class FaceRecognizer:
                 self._decay_counters()
                 return [], [], None
 
+            # Calculate landmarks for liveness detection
+            landmarks_list = face_recognition.face_landmarks(rgb_small, locations)
             db_encodings, db_names = self._db.get_all_encodings_and_names()
             scale = int(1 / PROCESS_SCALE)
 
@@ -118,7 +122,7 @@ class FaceRecognizer:
             face_labels: List[str] = []
             auth_event: Optional[RecognitionEvent] = None
 
-            for loc, enc in zip(locations, encodings):
+            for idx, (loc, enc) in enumerate(zip(locations, encodings)):
                 top, right, bottom, left = (v * scale for v in loc)
                 face_boxes.append((top, right, bottom, left))
 
@@ -136,7 +140,26 @@ class FaceRecognizer:
                             name = db_names[best]
                             confidence = float(1.0 - distances[best])
 
-                face_labels.append(name)
+                # Blink detection logic for known faces
+                if name != "Unknown" and idx < len(landmarks_list):
+                    landmarks = landmarks_list[idx]
+                    ear = self._calculate_ear(landmarks)
+                    
+                    # Track state machine
+                    current_state = self._blink_state.get(name, "OPEN")
+                    if ear < 0.20:  # Closed threshold
+                        self._blink_state[name] = "CLOSED"
+                    elif ear >= 0.20 and current_state == "CLOSED":
+                        self._blink_state[name] = "OPEN"
+                        self._blink_counted[name] = True
+                        logger.info("Blink detected for '%s'! EAR: %.2f", name, ear)
+
+                # Set label text
+                label_name = name
+                if name != "Unknown":
+                    if not self._blink_counted.get(name, False):
+                        label_name = f"{name} (Blink to Unlock)"
+                face_labels.append(label_name)
 
                 # Confirmation logic
                 if name != "Unknown":
@@ -173,9 +196,17 @@ class FaceRecognizer:
                          name, count, self._confirm_frames)
             return None
 
-        # Reset counter so it doesn't fire every frame
+        # Check if they have blinked (liveness check)
+        if not self._blink_counted.get(name, False):
+            # Keep match counter at confirmation threshold so we don't drop out of matching
+            with self._lock:
+                self._match_counter[name] = self._confirm_frames
+            return None
+
+        # Reset counter and blink state so it doesn't fire every frame
         with self._lock:
             self._match_counter[name] = 0
+            self._blink_counted[name] = False
 
         # Cooldown check
         now = datetime.datetime.now()
@@ -236,6 +267,24 @@ class FaceRecognizer:
                     to_delete.append(name)
             for name in to_delete:
                 del self._match_counter[name]
+                if name in self._blink_state:
+                    del self._blink_state[name]
+                if name in self._blink_counted:
+                    del self._blink_counted[name]
+
+    def _calculate_ear(self, landmarks: dict) -> float:
+        left_eye = landmarks.get("left_eye")
+        right_eye = landmarks.get("right_eye")
+        if not left_eye or not right_eye or len(left_eye) < 6 or len(right_eye) < 6:
+            return 0.0
+
+        def distance(p1, p2):
+            return np.sqrt((p1[0] - p2[0])**2 + (p1[1] - p2[1])**2)
+
+        ear_left = (distance(left_eye[1], left_eye[5]) + distance(left_eye[2], left_eye[4])) / (2.0 * distance(left_eye[0], left_eye[3]))
+        ear_right = (distance(right_eye[1], right_eye[5]) + distance(right_eye[2], right_eye[4])) / (2.0 * distance(right_eye[0], right_eye[3]))
+
+        return float((ear_left + ear_right) / 2.0)
 
     def _dispatch(self, event: RecognitionEvent) -> None:
         for cb in self._event_callbacks:
