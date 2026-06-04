@@ -117,8 +117,23 @@ class MJPEGStreamingHandler(http.server.BaseHTTPRequestHandler):
                     time.sleep(0.07)  # limit stream to ~15 FPS
             except Exception:
                 pass
+        elif self.path.startswith("/frame.jpg"):
+            with latest_frame_lock:
+                frame = latest_frame_jpeg
+            if frame is not None:
+                self.send_response(200)
+                self.send_header("Content-Type", "image/jpeg")
+                self.send_header("Content-Length", str(len(frame)))
+                self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
+                self.send_header("Pragma", "no-cache")
+                self.send_header("Expires", "0")
+                self.end_headers()
+                self.wfile.write(frame)
+            else:
+                self.send_response(404)
+                self.end_headers()
         elif self.path in ("/", "/index.html"):
-            # Serve responsive HTML embedding for iOS WKWebView/Blynk Webpage widget compatibility
+            # Serve responsive, double-buffered HTML viewer to bypass iOS Safari MJPEG buffering bug
             html = """<!DOCTYPE html>
 <html>
 <head>
@@ -131,7 +146,22 @@ class MJPEGStreamingHandler(http.server.BaseHTTPRequestHandler):
     </style>
 </head>
 <body>
-    <img src="/stream.mjpg" alt="Live Camera Feed">
+    <img id="feed" src="/frame.jpg" alt="Live Camera Feed">
+    <script>
+        const img = document.getElementById('feed');
+        function loadNext() {
+            const nextImg = new Image();
+            nextImg.onload = () => {
+                img.src = nextImg.src;
+                setTimeout(loadNext, 60); // limit to ~15 FPS
+            };
+            nextImg.onerror = () => {
+                setTimeout(loadNext, 500);
+            };
+            nextImg.src = '/frame.jpg?t=' + Date.now();
+        }
+        loadNext();
+    </script>
 </body>
 </html>
 """
