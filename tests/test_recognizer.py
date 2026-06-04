@@ -49,8 +49,11 @@ class TestFaceRecognizer(unittest.TestCase):
         self.db = FaceDatabase(self._tmp.name)
         self.db.enroll("Alice", ALICE_ENC)
         self.db.enroll("Bob", BOB_ENC)
+        self._patcher = patch("recognizer.LIVENESS_ENABLED", False)
+        self._patcher.start()
 
     def tearDown(self):
+        self._patcher.stop()
         if os.path.exists(self._tmp.name):
             os.unlink(self._tmp.name)
 

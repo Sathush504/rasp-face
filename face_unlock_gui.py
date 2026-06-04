@@ -25,11 +25,11 @@ import tkinter as tk
 import http.server
 import socketserver
 import time
-from tkinter import font as tkfont
-from tkinter import messagebox, simpledialog, ttk
+from tkinter import messagebox, simpledialog
 from typing import Optional
 
 import cv2
+import customtkinter as ctk
 from PIL import Image, ImageTk
 
 # ---------------------------------------------------------------------------
@@ -148,10 +148,10 @@ CLR_BORDER = "#263238"
 class FaceUnlockApp:
     """Top-level GUI orchestrating all subsystems."""
 
-    def __init__(self, window: tk.Tk, title: str = "Smart Door Access System"):
+    def __init__(self, window: ctk.CTk, title: str = "Smart Door Access System"):
         self.window = window
         self.window.title(title)
-        self.window.configure(bg=CLR_BG)
+        self.window.configure(fg_color=CLR_BG)
         self.window.protocol("WM_DELETE_WINDOW", self._on_close)
 
         # ------------------------------------------------------------------
@@ -223,80 +223,86 @@ class FaceUnlockApp:
     def _build_ui(self) -> None:
         """Assemble the complete UI layout."""
         # Fonts
-        self._font_title = tkfont.Font(family="Inter", size=13, weight="bold")
-        self._font_label = tkfont.Font(family="Inter", size=10)
-        self._font_mono = tkfont.Font(family="Courier", size=9)
-        self._font_status_big = tkfont.Font(family="Inter", size=16, weight="bold")
+        self._font_title = ("Inter", 13, "bold")
+        self._font_label = ("Inter", 10)
+        self._font_mono = ("Courier", 9)
+        self._font_status_big = ("Inter", 16, "bold")
 
         # ── Top bar ───────────────────────────────────────────────────────
-        top_bar = tk.Frame(self.window, bg=CLR_PANEL, pady=6)
+        top_bar = ctk.CTkFrame(self.window, fg_color=CLR_PANEL, corner_radius=0)
         top_bar.pack(fill=tk.X)
 
-        tk.Label(
+        ctk.CTkLabel(
             top_bar,
             text="🔐  Smart Door Access System",
-            bg=CLR_PANEL,
-            fg=CLR_ACCENT,
+            text_color=CLR_ACCENT,
             font=self._font_title,
-        ).pack(side=tk.LEFT, padx=14)
+        ).pack(side=tk.LEFT, padx=14, pady=8)
 
-        self._lbl_blynk_status = tk.Label(
+        self._lbl_blynk_status = ctk.CTkLabel(
             top_bar, text="● Blynk: Connecting…",
-            bg=CLR_PANEL, fg=CLR_AMBER,
+            text_color=CLR_AMBER,
             font=self._font_label,
         )
-        self._lbl_blynk_status.pack(side=tk.RIGHT, padx=14)
+        self._lbl_blynk_status.pack(side=tk.RIGHT, padx=14, pady=8)
 
         # ── Main content area ─────────────────────────────────────────────
-        content = tk.Frame(self.window, bg=CLR_BG)
+        content = ctk.CTkFrame(self.window, fg_color=CLR_BG, corner_radius=0)
         content.pack(fill=tk.BOTH, expand=True, padx=10, pady=6)
 
         # Left: video + lock badge
-        left_col = tk.Frame(content, bg=CLR_BG)
+        left_col = ctk.CTkFrame(content, fg_color="transparent")
         left_col.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
         self._video_canvas = tk.Canvas(
             left_col, bg="black",
             width=FRAME_WIDTH, height=FRAME_HEIGHT,
             highlightthickness=2, highlightbackground=CLR_BORDER,
+            bd=0
         )
         self._video_canvas.pack()
 
         # Lock status badge
-        self._lock_badge = tk.Label(
+        self._lock_badge = ctk.CTkLabel(
             left_col,
             text="🔒  LOCKED",
-            bg=CLR_RED, fg="white",
+            fg_color=CLR_RED, text_color="white",
             font=self._font_status_big,
-            padx=20, pady=8,
+            corner_radius=8,
+            height=36
         )
         self._lock_badge.pack(fill=tk.X, pady=(6, 0))
 
         # Enrollment progress bar (hidden by default)
-        self._enroll_frame = tk.Frame(left_col, bg=CLR_BG)
-        self._enroll_label = tk.Label(
-            self._enroll_frame, text="", bg=CLR_BG, fg=CLR_ACCENT,
+        self._enroll_frame = ctk.CTkFrame(left_col, fg_color="transparent")
+        self._enroll_label = ctk.CTkLabel(
+            self._enroll_frame, text="", text_color=CLR_ACCENT,
             font=self._font_label,
         )
         self._enroll_label.pack()
-        self._enroll_bar = ttk.Progressbar(
-            self._enroll_frame, length=FRAME_WIDTH, maximum=100
+        self._enroll_bar = ctk.CTkProgressBar(
+            self._enroll_frame, width=FRAME_WIDTH, height=10,
+            corner_radius=5, progress_color=CLR_ACCENT
         )
-        self._enroll_bar.pack(fill=tk.X)
+        self._enroll_bar.set(0.0)
+        self._enroll_bar.pack(fill=tk.X, pady=4)
 
         # ── Status bar (created BEFORE control panel so _update_status_bar
         # is safe to call during _refresh_people_list inside _build_control_panel)
         self._status_var = tk.StringVar(value="Initialising…")
-        tk.Label(
+        self._status_label = ctk.CTkLabel(
             self.window,
             textvariable=self._status_var,
-            bg=CLR_BORDER, fg=CLR_MUTED,
+            fg_color=CLR_BORDER, text_color=CLR_MUTED,
             font=self._font_mono,
-            anchor=tk.W, padx=8, pady=3,
-        ).pack(fill=tk.X, side=tk.BOTTOM)
+            corner_radius=0,
+            height=20,
+            anchor=tk.W
+        )
+        self._status_label.pack(fill=tk.X, side=tk.BOTTOM)
 
         # Right panel: controls + log
-        right_col = tk.Frame(content, bg=CLR_PANEL, width=260)
+        right_col = ctk.CTkFrame(content, fg_color=CLR_PANEL, width=260, corner_radius=8)
         right_col.pack(side=tk.RIGHT, fill=tk.Y, padx=(8, 0))
         right_col.pack_propagate(False)
 
@@ -306,58 +312,54 @@ class FaceUnlockApp:
         # Periodically refresh Blynk connection indicator
         self._poll_blynk_status()
 
-    def _build_control_panel(self, parent: tk.Frame) -> None:
-        tk.Label(
+    def _build_control_panel(self, parent: ctk.CTkFrame) -> None:
+        ctk.CTkLabel(
             parent, text="CONTROLS",
-            bg=CLR_PANEL, fg=CLR_MUTED, font=self._font_mono
+            text_color=CLR_MUTED, font=self._font_mono
         ).pack(anchor=tk.W, padx=10, pady=(10, 2))
 
-        btn_cfg = dict(
-            bg=CLR_BORDER, fg=CLR_TEXT,
-            activebackground=CLR_ACCENT, activeforeground=CLR_BG,
-            font=self._font_label,
-            relief=tk.FLAT, cursor="hand2",
-            width=24, pady=6,
-        )
-
-        self._btn_enroll = tk.Button(
+        self._btn_enroll = ctk.CTkButton(
             parent, text="👤  Enroll New Face",
-            command=self._start_enrollment, **btn_cfg
+            command=self._start_enrollment,
+            fg_color="#2563eb", hover_color="#1d4ed8", text_color="white",
+            font=self._font_label, height=32, corner_radius=6
         )
         self._btn_enroll.pack(padx=10, pady=4, fill=tk.X)
 
-        self._btn_remove = tk.Button(
+        self._btn_remove = ctk.CTkButton(
             parent, text="🗑️  Remove Person",
-            command=self._remove_person, **btn_cfg
+            command=self._remove_person,
+            fg_color="#4b5563", hover_color="#374151", text_color="white",
+            font=self._font_label, height=32, corner_radius=6
         )
         self._btn_remove.pack(padx=10, pady=4, fill=tk.X)
 
-        self._btn_remote_unlock = tk.Button(
+        self._btn_remote_unlock = ctk.CTkButton(
             parent, text="🔓  Manual Unlock (Admin)",
-            command=self._admin_unlock, **btn_cfg
+            command=self._admin_unlock,
+            fg_color="#0d9488", hover_color="#0f766e", text_color="white",
+            font=self._font_label, height=32, corner_radius=6
         )
         self._btn_remote_unlock.pack(padx=10, pady=4, fill=tk.X)
 
-        self._btn_clear = tk.Button(
+        self._btn_clear = ctk.CTkButton(
             parent, text="⚠️  Clear All Profiles",
             command=self._clear_database,
-            bg="#37000a", fg=CLR_RED,
-            activebackground=CLR_RED, activeforeground="white",
-            font=self._font_label, relief=tk.FLAT, cursor="hand2",
-            width=24, pady=6,
+            fg_color="#7f1d1d", hover_color="#b91c1c", text_color="white",
+            font=self._font_label, height=32, corner_radius=6
         )
         self._btn_clear.pack(padx=10, pady=(14, 4), fill=tk.X)
 
         # Enrolled people list
-        tk.Label(
-            parent, text="ENROLLED", bg=CLR_PANEL,
-            fg=CLR_MUTED, font=self._font_mono
+        ctk.CTkLabel(
+            parent, text="ENROLLED",
+            text_color=CLR_MUTED, font=self._font_mono
         ).pack(anchor=tk.W, padx=10, pady=(14, 2))
 
-        list_frame = tk.Frame(parent, bg=CLR_PANEL)
+        list_frame = ctk.CTkFrame(parent, fg_color="transparent")
         list_frame.pack(padx=10, fill=tk.BOTH, expand=True)
 
-        scrollbar = tk.Scrollbar(list_frame, bg=CLR_BORDER)
+        scrollbar = tk.Scrollbar(list_frame, bg=CLR_BORDER, bd=0)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
         self._people_list = tk.Listbox(
@@ -366,22 +368,23 @@ class FaceUnlockApp:
             bg=CLR_BG, fg=CLR_TEXT,
             selectbackground=CLR_ACCENT, selectforeground=CLR_BG,
             font=self._font_mono, relief=tk.FLAT, bd=0,
+            highlightthickness=0
         )
         self._people_list.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scrollbar.config(command=self._people_list.yview)
 
         self._refresh_people_list()
 
-    def _build_log_panel(self, parent: tk.Frame) -> None:
-        tk.Label(
+    def _build_log_panel(self, parent: ctk.CTkFrame) -> None:
+        ctk.CTkLabel(
             parent, text="ACCESS LOG",
-            bg=CLR_PANEL, fg=CLR_MUTED, font=self._font_mono
+            text_color=CLR_MUTED, font=self._font_mono
         ).pack(anchor=tk.W, padx=10, pady=(10, 2))
 
-        log_frame = tk.Frame(parent, bg=CLR_PANEL)
+        log_frame = ctk.CTkFrame(parent, fg_color="transparent")
         log_frame.pack(padx=10, fill=tk.BOTH, expand=True, pady=(0, 10))
 
-        log_scroll = tk.Scrollbar(log_frame, bg=CLR_BORDER)
+        log_scroll = tk.Scrollbar(log_frame, bg=CLR_BORDER, bd=0)
         log_scroll.pack(side=tk.RIGHT, fill=tk.Y)
 
         self._log_text = tk.Text(
@@ -392,6 +395,7 @@ class FaceUnlockApp:
             relief=tk.FLAT, bd=0,
             state=tk.DISABLED, wrap=tk.WORD,
             height=10,
+            highlightthickness=0
         )
         self._log_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         log_scroll.config(command=self._log_text.yview)
@@ -506,16 +510,19 @@ class FaceUnlockApp:
         self._enroll_is_remote = False
         self._enroll_session = EnrollmentSession(name.strip(), self._db)
         self._enroll_frame.pack(fill=tk.X, pady=4)
-        self._enroll_label.config(text=f"Enrolling: {name.strip()}")
+        self._enroll_label.configure(text=f"Enrolling: {name.strip()}")
         self._update_status_bar(f"Enrollment started for '{name.strip()}' — look at the camera")
         logger.info("Enrollment session started for '%s'.", name.strip())
 
     def _start_remote_enrollment(self, name: str) -> None:
-        name = name.strip()
+        """Start enrollment workflow requested via Blynk terminal."""
+        if self._enroll_session is not None:
+            logger.warning("Enrollment session already active. Ignoring remote request.")
+            return
         self._enroll_is_remote = True
         self._enroll_session = EnrollmentSession(name, self._db)
         self._enroll_frame.pack(fill=tk.X, pady=4)
-        self._enroll_label.config(text=f"Enrolling: {name}")
+        self._enroll_label.configure(text=f"Enrolling: {name}")
         self._update_status_bar(f"Remote enrollment started for '{name}' — look at the camera")
         logger.info("Remote enrollment session started for '%s'.", name)
         ts = datetime.datetime.now().strftime("%H:%M:%S")
@@ -523,8 +530,8 @@ class FaceUnlockApp:
 
     def _handle_enrollment_frame(self, bgr) -> None:
         result = self._enroll_session.feed_frame(bgr)
-        self._enroll_label.config(text=result.message)
-        self._enroll_bar["value"] = result.progress
+        self._enroll_label.configure(text=result.message)
+        self._enroll_bar.set(result.progress / 100.0)
 
         # Draw a cyan border during enrollment
         h, w = bgr.shape[:2]
@@ -836,9 +843,9 @@ class FaceUnlockApp:
 
     def _update_lock_ui(self, is_unlocked: bool) -> None:
         if is_unlocked:
-            self._lock_badge.config(text="🔓  UNLOCKED", bg=CLR_GREEN)
+            self._lock_badge.configure(text="🔓  UNLOCKED", fg_color=CLR_GREEN)
         else:
-            self._lock_badge.config(text="🔒  LOCKED", bg=CLR_RED)
+            self._lock_badge.configure(text="🔒  LOCKED", fg_color=CLR_RED)
         self._blynk.update_lock_status(is_unlocked)
 
     # -----------------------------------------------------------------------
@@ -884,12 +891,12 @@ class FaceUnlockApp:
     def _poll_blynk_status(self) -> None:
         """Refresh the Blynk connection indicator every 5 s."""
         if self._blynk.is_connected():
-            self._lbl_blynk_status.config(
-                text="● Blynk: Online", fg=CLR_GREEN
+            self._lbl_blynk_status.configure(
+                text="● Blynk: Online", text_color=CLR_GREEN
             )
         else:
-            self._lbl_blynk_status.config(
-                text="● Blynk: Offline", fg=CLR_AMBER
+            self._lbl_blynk_status.configure(
+                text="● Blynk: Offline", text_color=CLR_AMBER
             )
         self.window.after(5000, self._poll_blynk_status)
 
@@ -907,42 +914,48 @@ class FaceUnlockApp:
 # ===========================================================================
 # Helper dialog — person selection from a list
 # ===========================================================================
-class _SelectPersonDialog(tk.Toplevel):
+class _SelectPersonDialog(ctk.CTkToplevel):
     """Modal dialog with a listbox for selecting a person name."""
 
     def __init__(self, parent, people: list, title="Select Person"):
         super().__init__(parent)
         self.title(title)
         self.resizable(False, False)
-        self.configure(bg=CLR_BG)
+        self.configure(fg_color=CLR_BG)
         self.result = None
         self.grab_set()
 
-        tk.Label(self, text="Select a person:", bg=CLR_BG, fg=CLR_TEXT,
-                 font=("Inter", 10)).pack(padx=16, pady=(12, 4))
+        ctk.CTkLabel(self, text="Select a person:", text_color=CLR_TEXT,
+                     font=("Inter", 11, "bold")).pack(padx=16, pady=(12, 4))
+
+        list_frame = ctk.CTkFrame(self, fg_color=CLR_PANEL, corner_radius=8)
+        list_frame.pack(padx=16, pady=4)
 
         self._lb = tk.Listbox(
-            self, bg=CLR_PANEL, fg=CLR_TEXT,
+            list_frame, bg=CLR_PANEL, fg=CLR_TEXT,
             selectbackground=CLR_ACCENT, selectforeground=CLR_BG,
             font=("Courier", 10), relief=tk.FLAT, bd=0,
             width=30, height=min(len(people), 10),
+            highlightthickness=0
         )
         for p in people:
             self._lb.insert(tk.END, p)
-        self._lb.pack(padx=16, pady=4)
+        self._lb.pack(padx=8, pady=8)
         self._lb.bind("<Double-Button-1>", self._ok)
 
-        btn_frame = tk.Frame(self, bg=CLR_BG)
+        btn_frame = ctk.CTkFrame(self, fg_color="transparent")
         btn_frame.pack(pady=10)
-        tk.Button(
+
+        ctk.CTkButton(
             btn_frame, text="Select", command=self._ok,
-            bg=CLR_ACCENT, fg=CLR_BG, font=("Inter", 10, "bold"),
-            relief=tk.FLAT, padx=16, pady=4,
+            fg_color=CLR_ACCENT, text_color=CLR_BG, font=("Inter", 11, "bold"),
+            hover_color="#00b8d4", width=80, height=28, corner_radius=4
         ).pack(side=tk.LEFT, padx=6)
-        tk.Button(
+
+        ctk.CTkButton(
             btn_frame, text="Cancel", command=self.destroy,
-            bg=CLR_BORDER, fg=CLR_TEXT, font=("Inter", 10),
-            relief=tk.FLAT, padx=16, pady=4,
+            fg_color=CLR_BORDER, text_color=CLR_TEXT, font=("Inter", 11),
+            hover_color="#374151", width=80, height=28, corner_radius=4
         ).pack(side=tk.LEFT, padx=6)
 
         self.wait_window()
@@ -958,7 +971,9 @@ class _SelectPersonDialog(tk.Toplevel):
 # Entry point
 # ===========================================================================
 if __name__ == "__main__":
-    root = tk.Tk()
+    ctk.set_appearance_mode("dark")
+    ctk.set_default_color_theme("blue")
+    root = ctk.CTk()
     root.resizable(False, False)
     app = FaceUnlockApp(root, "🔐 Smart Door Access System")
     root.mainloop()
