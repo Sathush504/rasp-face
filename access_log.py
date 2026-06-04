@@ -84,6 +84,14 @@ class AccessLogger:
 
         logger.info("[ACCESS LOG] %s", line)
 
+    def close(self) -> None:
+        """Release underlying file handler resources."""
+        with self._lock:
+            try:
+                self._handler.close()
+            except Exception:
+                pass
+
     def read_recent(self, n: int = 20) -> list:
         """Return the last *n* log records as parsed dicts."""
         records = []
@@ -108,15 +116,12 @@ class AccessLogger:
     # Internal
     # ------------------------------------------------------------------
     def _build_handler(self) -> RotatingFileHandler:
-        handler = RotatingFileHandler(
+        return RotatingFileHandler(
             self._path,
             maxBytes=LOG_MAX_BYTES,
             backupCount=LOG_BACKUP_COUNT,
             encoding="utf-8",
         )
-        # Open immediately so the file handle is ready
-        handler.stream = handler._open()
-        return handler
 
     def _should_rollover(self) -> bool:
         """Check if current log file exceeds max size."""

@@ -904,6 +904,7 @@ class FaceUnlockApp:
         logger.info("Shutting down…")
         self._processing_thread_active = False
         self._access_log.log_event("SHUTDOWN", source="system")
+        self._access_log.close()
         self._blynk.stop()
         self._door.cleanup()
         if self._cap.isOpened():

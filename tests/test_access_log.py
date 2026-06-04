@@ -28,6 +28,7 @@ class TestAccessLogger(unittest.TestCase):
         self.logger = AccessLogger(log_path=self._log_path)
 
     def tearDown(self):
+        self.logger.close()
         if os.path.exists(self._log_path):
             os.unlink(self._log_path)
 
