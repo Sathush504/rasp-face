@@ -107,12 +107,13 @@ class MJPEGStreamingHandler(http.server.BaseHTTPRequestHandler):
                     if frame is None:
                         time.sleep(0.03)
                         continue
-                    self.wfile.write(b"--frame\r\n")
-                    self.send_header("Content-Type", "image/jpeg")
-                    self.send_header("Content-Length", str(len(frame)))
-                    self.end_headers()
+                    # Direct binary write with leading CRLF for Webkit/Safari/iOS compatibility
+                    self.wfile.write(
+                        b"\r\n--frame\r\n"
+                        b"Content-Type: image/jpeg\r\n"
+                        b"Content-Length: " + str(len(frame)).encode("utf-8") + b"\r\n\r\n"
+                    )
                     self.wfile.write(frame)
-                    self.wfile.write(b"\r\n")
                     time.sleep(0.07)  # limit stream to ~15 FPS
             except Exception:
                 pass
