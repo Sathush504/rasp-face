@@ -581,11 +581,13 @@ class FaceUnlockApp:
         if cmd == "help":
             help_msg = (
                 f"[{ts}] --- COMMANDS ---\n"
-                "  help   - Show commands\n"
-                "  status - System state\n"
-                "  log    - Last 5 events\n"
-                "  unlock - Open door\n"
-                "  lock   - Secure door"
+                "  help        - Show commands\n"
+                "  status      - System state\n"
+                "  log         - Last 5 events\n"
+                "  unlock      - Open door\n"
+                "  lock        - Secure door\n"
+                "  enroll:Name - Enroll face\n"
+                "  remove:Name - Delete user"
             )
             self._blynk.send_access_event(help_msg)
 
@@ -642,6 +644,30 @@ class FaceUnlockApp:
                 self._blynk.send_access_event(f"[{ts}] ✗ Error: Enrollment session already active.")
             else:
                 self._start_remote_enrollment(enroll_name)
+
+        elif cmd.startswith("remove:"):
+            remove_name = cmd_text[7:].strip()
+            if not remove_name:
+                self._blynk.send_access_event(f"[{ts}] ✗ Error: Name cannot be empty. Usage: remove:Name")
+            else:
+                people = self._db.list_people()
+                match = None
+                for person in people:
+                    if person.lower() == remove_name.lower():
+                        match = person
+                        break
+
+                if match:
+                    success = self._db.remove_person(match)
+                    if success:
+                        self._access_log.log_event("REMOVAL", name=match, source="blynk")
+                        self._blynk.send_access_event(f"[{ts}] ✓ REMOVED: {match}")
+                        self._refresh_people_list()
+                        self._update_status_bar(f"Profile '{match}' removed via Blynk.")
+                    else:
+                        self._blynk.send_access_event(f"[{ts}] ✗ Error: Failed to remove {match}.")
+                else:
+                    self._blynk.send_access_event(f"[{ts}] ✗ Error: User '{remove_name}' not found.")
 
         else:
             self._blynk.send_access_event(f"[{ts}] Unknown command. Type 'help' for commands.")
