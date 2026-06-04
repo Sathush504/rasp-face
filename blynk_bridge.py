@@ -248,29 +248,41 @@ class BlynkBridge:
         except Exception as exc:
             logger.warning("Failed to publish V%d: %s" if isinstance(vpin, int) else "Failed to publish %s: %s", vpin, exc)
 
-    def trigger_event(self, event_code: str) -> None:
-        """Trigger a Blynk push notification/event log asynchronously via HTTP API."""
+    def trigger_event(self, event_code: str, message: str = "Intruder detected!") -> None:
+        """Trigger a Blynk push notification/event log via MQTT (primary) and HTTP API (fallback)."""
         if not self._auth:
             return
+
+        # 1. Primary: Publish via MQTT if connected
+        if self._connected and self._client is not None:
+            try:
+                topic = f"event/{event_code}"
+                self._client.publish(topic, message, qos=1)
+                logger.info("Triggered Blynk event via MQTT: %s", event_code)
+            except Exception as exc:
+                logger.warning("Failed to publish event via MQTT: %s", exc)
+
+        # 2. Fallback: Call HTTP API in a background thread
         threading.Thread(
             target=self._call_log_event_api,
-            args=(event_code,),
+            args=(event_code, message),
             daemon=True
         ).start()
 
-    def _call_log_event_api(self, event_code: str) -> None:
+    def _call_log_event_api(self, event_code: str, message: str) -> None:
         import urllib.request
-        # Blynk API expects the token and event code
+        import urllib.parse
+        # Blynk API expects the token, event code, and optional urlencoded description
+        safe_msg = urllib.parse.quote(message)
         url = (
             f"https://blynk.cloud/external/api/logEvent"
-            f"?token={self._auth}&code={event_code}"
+            f"?token={self._auth}&code={event_code}&description={safe_msg}"
         )
         try:
             req = urllib.request.Request(url, method="GET")
             with urllib.request.urlopen(req, timeout=5.0) as response:
-                if response.status == 200:
-                    logger.info("Successfully triggered Blynk event: %s", event_code)
-                else:
-                    logger.warning("Blynk event API returned status: %d", response.status)
+                # read to fetch response and get status
+                body = response.read()
+                logger.info("Successfully triggered Blynk event API: %s (status: %d)", event_code, response.status)
         except Exception as exc:
             logger.warning("Failed to call Blynk event API: %s", exc)
