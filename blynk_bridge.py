@@ -195,7 +195,9 @@ class BlynkBridge:
                 # Direct string match (case-insensitive and stripping "V" if needed)
                 is_match = (
                     ds_str.lower() == self._vpin_unlock.lower() or
-                    ds_str.lstrip("Vv").lower() == self._vpin_unlock.lstrip("Vv").lower()
+                    ds_str.lstrip("Vv").lower() == self._vpin_unlock.lstrip("Vv").lower() or
+                    (self._vpin_unlock.lower() == "unlock button" and ds_str.lower() in ("v0", "v0_button")) or
+                    (self._vpin_unlock.lower() in ("v0", "v0_button") and ds_str.lower() == "unlock button")
                 )
 
             if is_match:
