@@ -16,7 +16,7 @@ class TestDoorLock(unittest.TestCase):
 
     def _make_lock(self, duration=0.2):
         """Create a DoorLock on a fake pin with short unlock duration."""
-        return DoorLock(pin=18, active_high=True, unlock_duration=duration)
+        return DoorLock(pin=18, active_high=True, unlock_duration=duration, remote_ip="")
 
     def test_initial_state_is_locked(self):
         lock = self._make_lock()

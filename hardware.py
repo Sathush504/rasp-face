@@ -112,9 +112,12 @@ class DoorLock:
                 self._pi = None
 
         if not self._pi:
-            GPIO.setmode(GPIO.BCM)
-            GPIO.setup(self.pin, GPIO.OUT, initial=self._locked_signal())
-            logger.info("DoorLock initialised on local GPIO pin %d.", self.pin)
+            if self.remote_ip:
+                logger.info("DoorLock initialised in REMOTE HTTP mode on Pi at http://%s:8000.", self.remote_ip)
+            else:
+                GPIO.setmode(GPIO.BCM)
+                GPIO.setup(self.pin, GPIO.OUT, initial=self._locked_signal())
+                logger.info("DoorLock initialised on local GPIO pin %d.", self.pin)
         else:
             self._set_gpio(unlocked=False)
             logger.info("DoorLock initialised on remote GPIO pin %d.", self.pin)
@@ -181,11 +184,28 @@ class DoorLock:
             val = 1 if signal else 0
             try:
                 self._pi.write(self.pin, val)
-                logger.debug("[REMOTE GPIO] pin %d → %d", self.pin, val)
+                logger.debug("[REMOTE GPIO via pigpio] pin %d → %d", self.pin, val)
             except Exception as exc:
                 logger.warning("Remote GPIO write failed: %s", exc)
+        elif self.remote_ip:
+            if unlocked:
+                logger.debug("[REMOTE GPIO via HTTP] Sending unlock command to http://%s:8000/unlock", self.remote_ip)
+                threading.Thread(target=self._trigger_http_unlock, daemon=True).start()
         else:
             GPIO.output(self.pin, GPIO.HIGH if signal else GPIO.LOW)
+
+    def _trigger_http_unlock(self) -> None:
+        import urllib.request
+        url = f"http://{self.remote_ip}:8000/unlock"
+        try:
+            req = urllib.request.Request(url, method="POST")
+            with urllib.request.urlopen(req, timeout=2.0) as response:
+                if response.status == 200:
+                    logger.info("Successfully triggered remote unlock via HTTP API on %s", self.remote_ip)
+                else:
+                    logger.warning("HTTP unlock request returned status %d", response.status)
+        except Exception as exc:
+            logger.warning("Failed to trigger remote unlock via HTTP on %s: %s", self.remote_ip, exc)
 
     def _auto_relock(self) -> None:
         with self._state_lock:
