@@ -117,6 +117,29 @@ class MJPEGStreamingHandler(http.server.BaseHTTPRequestHandler):
                     time.sleep(0.07)  # limit stream to ~15 FPS
             except Exception:
                 pass
+        elif self.path in ("/", "/index.html"):
+            # Serve responsive HTML embedding for iOS WKWebView/Blynk Webpage widget compatibility
+            html = """<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Smart Door Camera Feed</title>
+    <style>
+        html, body { margin: 0; padding: 0; width: 100%; height: 100%; background-color: #000; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+        img { width: 100%; height: 100%; max-width: 100%; max-height: 100%; object-fit: contain; }
+    </style>
+</head>
+<body>
+    <img src="/stream.mjpg" alt="Live Camera Feed">
+</body>
+</html>
+"""
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(html)))
+            self.end_headers()
+            self.wfile.write(html.encode("utf-8"))
         else:
             self.send_response(404)
             self.end_headers()
