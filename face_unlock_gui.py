@@ -198,6 +198,17 @@ class FaceUnlockApp:
         self._last_bgr = None
 
         # ------------------------------------------------------------------
+        # Background Face Processing Thread
+        # ------------------------------------------------------------------
+        self._processing_lock = threading.Lock()
+        self._processing_thread_active = True
+        self._latest_boxes = []
+        self._latest_labels = []
+        self._pending_frame = None
+        self._processing_thread = threading.Thread(target=self._background_processing_loop, daemon=True)
+        self._processing_thread.start()
+
+        # ------------------------------------------------------------------
         # Build UI
         # ------------------------------------------------------------------
         self._build_ui()
@@ -413,13 +424,41 @@ class FaceUnlockApp:
         if self._enroll_session is not None:
             self._handle_enrollment_frame(bgr)
         else:
-            # Recognition mode
-            boxes, labels, event = self._recognizer.process_frame(bgr)
+            # Send frame to background thread for processing (non-blocking!)
+            with self._processing_lock:
+                self._pending_frame = bgr.copy()
+            
+            # Draw the last known face boxes and labels (very fast!)
+            with self._processing_lock:
+                boxes = self._latest_boxes
+                labels = self._latest_labels
             self._draw_overlays(bgr, boxes, labels)
 
         self._render_frame(bgr)
         set_latest_frame(bgr)
         self.window.after(VIDEO_LOOP_MS, self._poll_camera)
+
+    def _background_processing_loop(self) -> None:
+        while self._processing_thread_active:
+            frame_to_process = None
+            with self._processing_lock:
+                if self._pending_frame is not None:
+                    frame_to_process = self._pending_frame.copy()
+                    self._pending_frame = None
+            
+            if frame_to_process is not None:
+                try:
+                    boxes, labels, event = self._recognizer.process_frame(frame_to_process)
+                    with self._processing_lock:
+                        self._latest_boxes = boxes
+                        self._latest_labels = labels
+                    if event:
+                        self._on_recognition_event(event)
+                except Exception as e:
+                    logger.exception("Error in background face processing: %s", e)
+            
+            # Sleep slightly to prevent CPU pinning
+            time.sleep(0.015)
 
     def _draw_overlays(self, frame, boxes, labels) -> None:
         import numpy as np  # inline to keep top-level lean
@@ -836,6 +875,7 @@ class FaceUnlockApp:
 
     def _on_close(self) -> None:
         logger.info("Shutting down…")
+        self._processing_thread_active = False
         self._access_log.log_event("SHUTDOWN", source="system")
         self._blynk.stop()
         self._door.cleanup()
