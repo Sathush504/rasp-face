@@ -72,6 +72,8 @@ class FaceRecognizer:
         self._last_unlock_time: Dict[str, datetime.datetime] = {}
         self._blink_state: Dict[str, str] = {}
         self._blink_counted: Dict[str, bool] = {}
+        self._open_ear_history: Dict[str, List[float]] = {}
+        self._dynamic_threshold: Dict[str, float] = {}
 
         # Registered callbacks
         self._event_callbacks: List[Callable[[RecognitionEvent], None]] = []
@@ -141,28 +143,47 @@ class FaceRecognizer:
                 # Blink detection logic for known faces (only run if liveness check is required)
                 if LIVENESS_ENABLED and name != "Unknown" and not self._blink_counted.get(name, False):
                     rgb_full = cv2.cvtColor(bgr_frame, cv2.COLOR_BGR2RGB)
+                    rgb_full = self._apply_clahe(rgb_full)  # Task 2: Apply adaptive lighting (CLAHE)
+                    
                     full_loc = [(int(loc[0] * scale), int(loc[1] * scale), int(loc[2] * scale), int(loc[3] * scale))]
                     landmarks_list = face_recognition.face_landmarks(rgb_full, full_loc)
                     
                     if landmarks_list:
                         landmarks = landmarks_list[0]
                         ear = self._calculate_ear(landmarks)
-                        logger.info("Liveness [%s] -> EAR: %.3f (Threshold: %.2f)", name, ear, EYE_AR_THRESH)
                         
-                        # Track state machine
-                        current_state = self._blink_state.get(name, "OPEN")
-                        if ear < EYE_AR_THRESH:  # Closed threshold
-                            self._blink_state[name] = "CLOSED"
-                        elif ear >= EYE_AR_THRESH and current_state == "CLOSED":
-                            self._blink_state[name] = "OPEN"
-                            self._blink_counted[name] = True
-                            logger.info("✓ Liveness confirmed: Blink detected for '%s'!", name)
+                        # Task 1: Dynamic EAR Calibration
+                        history = self._open_ear_history.setdefault(name, [])
+                        if len(history) < 5:
+                            if ear > 0.12:
+                                history.append(ear)
+                            if len(history) == 5:
+                                baseline = sum(history) / 5.0
+                                # Set threshold to 72% of baseline, capped within reasonable bounds
+                                self._dynamic_threshold[name] = float(max(0.15, min(0.24, baseline * 0.72)))
+                                logger.info("✓ Dynamic EAR Calibration complete for '%s': Baseline=%.3f, Threshold=%.3f",
+                                            name, baseline, self._dynamic_threshold[name])
+                        else:
+                            thresh = self._dynamic_threshold.get(name, EYE_AR_THRESH)
+                            logger.info("Liveness [%s] -> EAR: %.3f (Threshold: %.2f)", name, ear, thresh)
+                            
+                            # Track state machine
+                            current_state = self._blink_state.get(name, "OPEN")
+                            if ear < thresh:  # Closed threshold
+                                self._blink_state[name] = "CLOSED"
+                            elif ear >= thresh and current_state == "CLOSED":
+                                self._blink_state[name] = "OPEN"
+                                self._blink_counted[name] = True
+                                logger.info("✓ Liveness confirmed: Blink detected for '%s'!", name)
 
                 # Set label text
                 label_name = name
                 if name != "Unknown" and LIVENESS_ENABLED:
                     if not self._blink_counted.get(name, False):
-                        label_name = f"{name} (Blink to Unlock)"
+                        if len(self._open_ear_history.get(name, [])) < 5:
+                            label_name = f"{name} (Calibrating...)"
+                        else:
+                            label_name = f"{name} (Blink to Unlock)"
                 face_labels.append(label_name)
 
                 # Confirmation logic
@@ -275,6 +296,10 @@ class FaceRecognizer:
                     del self._blink_state[name]
                 if name in self._blink_counted:
                     del self._blink_counted[name]
+                if name in self._open_ear_history:
+                    del self._open_ear_history[name]
+                if name in self._dynamic_threshold:
+                    del self._dynamic_threshold[name]
 
     def _calculate_ear(self, landmarks: dict) -> float:
         left_eye = landmarks.get("left_eye")
@@ -289,6 +314,17 @@ class FaceRecognizer:
         ear_right = (distance(right_eye[1], right_eye[5]) + distance(right_eye[2], right_eye[4])) / (2.0 * distance(right_eye[0], right_eye[3]))
 
         return float((ear_left + ear_right) / 2.0)
+
+    def _apply_clahe(self, rgb_img: np.ndarray) -> np.ndarray:
+        try:
+            lab = cv2.cvtColor(rgb_img, cv2.COLOR_RGB2LAB)
+            l, a, b = cv2.split(lab)
+            clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+            cl = clahe.apply(l)
+            limg = cv2.merge((cl, a, b))
+            return cv2.cvtColor(limg, cv2.COLOR_LAB2RGB)
+        except Exception:
+            return rgb_img
 
     def _dispatch(self, event: RecognitionEvent) -> None:
         for cb in self._event_callbacks:

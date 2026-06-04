@@ -55,6 +55,7 @@ from config import (
     VPIN_UNLOCK_BUTTON,
     USER_SCHEDULES,
     FALLBACK_PIN,
+    LIVENESS_ENABLED,
 )
 from database import FaceDatabase
 from enroller import EnrollmentSession
@@ -635,15 +636,34 @@ class FaceUnlockApp:
 
         elif cmd == "status":
             state = "UNLOCKED" if self._door.is_unlocked else "LOCKED"
-            num_users = len(self._db.list_people())
+            people = self._db.list_people()
             uptime_sec = int(time.time() - self._startup_time)
             uptime_str = f"{uptime_sec // 60}m {uptime_sec % 60}s"
+
+            # Get dynamic thresholds from recognizer
+            user_details = []
+            with self._recognizer._lock:
+                for name in people:
+                    sched = USER_SCHEDULES.get(name, "Always")
+                    if isinstance(sched, tuple) or isinstance(sched, list):
+                        sched_str = f"{sched[0]}-{sched[1]}"
+                    else:
+                        sched_str = str(sched)
+                    
+                    thresh = self._recognizer._dynamic_threshold.get(name)
+                    if thresh is not None:
+                        user_details.append(f"  - {name} [{sched_str}] (Calibrated: {thresh:.3f})")
+                    else:
+                        user_details.append(f"  - {name} [{sched_str}] (Config: default)")
+
+            users_str = "\n".join(user_details) if user_details else "  No users registered"
 
             status_msg = (
                 f"[{ts}] --- STATUS ---\n"
                 f"  Lock: {state}\n"
-                f"  Enrolled: {num_users} users\n"
-                f"  Uptime: {uptime_str}"
+                f"  Liveness: {'ON' if LIVENESS_ENABLED else 'OFF'}\n"
+                f"  Uptime: {uptime_str}\n"
+                f"  Users:\n{users_str}"
             )
             self._blynk.send_access_event(status_msg)
 
