@@ -25,7 +25,10 @@ UNLOCK_DURATION = 3.0  # seconds the lock stays open before auto-relocking
 try:
     import RPi.GPIO as GPIO
     GPIO.setmode(GPIO.BCM)
-    GPIO.setup(GPIO_PIN, GPIO.OUT, initial=GPIO.LOW if ACTIVE_HIGH else GPIO.HIGH)
+    if ACTIVE_HIGH:
+        GPIO.setup(GPIO_PIN, GPIO.OUT, initial=GPIO.LOW)
+    else:
+        GPIO.setup(GPIO_PIN, GPIO.IN)
     logger.info("GPIO initialized successfully (running in hardware mode).")
 except ImportError:
     GPIO = None
@@ -45,12 +48,19 @@ def perform_unlock():
 
     logger.info("TRIGGER: Unlocking door solenoid...")
     if GPIO:
-        GPIO.output(GPIO_PIN, GPIO.HIGH if ACTIVE_HIGH else GPIO.LOW)
+        if ACTIVE_HIGH:
+            GPIO.output(GPIO_PIN, GPIO.HIGH)
+        else:
+            GPIO.setup(GPIO_PIN, GPIO.OUT)
+            GPIO.output(GPIO_PIN, GPIO.LOW)
 
     time.sleep(UNLOCK_DURATION)
 
     if GPIO:
-        GPIO.output(GPIO_PIN, GPIO.LOW if ACTIVE_HIGH else GPIO.HIGH)
+        if ACTIVE_HIGH:
+            GPIO.output(GPIO_PIN, GPIO.LOW)
+        else:
+            GPIO.setup(GPIO_PIN, GPIO.IN)
     logger.info("TRIGGER: Auto-relocked door solenoid.")
 
     with lock_state_mutex:

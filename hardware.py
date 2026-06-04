@@ -116,8 +116,11 @@ class DoorLock:
                 logger.info("DoorLock initialised in REMOTE HTTP mode on Pi at http://%s:8000.", self.remote_ip)
             else:
                 GPIO.setmode(GPIO.BCM)
-                GPIO.setup(self.pin, GPIO.OUT, initial=self._locked_signal())
-                logger.info("DoorLock initialised on local GPIO pin %d.", self.pin)
+                if self.active_high:
+                    GPIO.setup(self.pin, GPIO.OUT, initial=self._locked_signal())
+                else:
+                    GPIO.setup(self.pin, GPIO.IN)
+                logger.info("DoorLock initialised on local GPIO pin %d (active_%s).", self.pin, "high" if self.active_high else "low")
         else:
             self._set_gpio(unlocked=False)
             logger.info("DoorLock initialised on remote GPIO pin %d.", self.pin)
@@ -179,12 +182,21 @@ class DoorLock:
         return self.active_high
 
     def _set_gpio(self, unlocked: bool) -> None:
-        signal = self._unlocked_signal() if unlocked else self._locked_signal()
         if self._pi:
-            val = 1 if signal else 0
             try:
-                self._pi.write(self.pin, val)
-                logger.debug("[REMOTE GPIO via pigpio] pin %d → %d", self.pin, val)
+                import pigpio
+                if self.active_high:
+                    val = 1 if unlocked else 0
+                    self._pi.write(self.pin, val)
+                    logger.debug("[REMOTE GPIO via pigpio] pin %d → %d", self.pin, val)
+                else:
+                    if unlocked:
+                        self._pi.set_mode(self.pin, pigpio.OUTPUT)
+                        self._pi.write(self.pin, 0)
+                        logger.debug("[REMOTE GPIO via pigpio] pin %d → LOW (Active)", self.pin)
+                    else:
+                        self._pi.set_mode(self.pin, pigpio.INPUT)
+                        logger.debug("[REMOTE GPIO via pigpio] pin %d → High-Impedance (Inactive)", self.pin)
             except Exception as exc:
                 logger.warning("Remote GPIO write failed: %s", exc)
         elif self.remote_ip:
@@ -192,7 +204,16 @@ class DoorLock:
                 logger.debug("[REMOTE GPIO via HTTP] Sending unlock command to http://%s:8000/unlock", self.remote_ip)
                 threading.Thread(target=self._trigger_http_unlock, daemon=True).start()
         else:
-            GPIO.output(self.pin, GPIO.HIGH if signal else GPIO.LOW)
+            if self.active_high:
+                GPIO.output(self.pin, GPIO.HIGH if unlocked else GPIO.LOW)
+            else:
+                if unlocked:
+                    GPIO.setup(self.pin, GPIO.OUT)
+                    GPIO.output(self.pin, GPIO.LOW)
+                    logger.debug("[LOCAL GPIO] pin %d → LOW (Active)", self.pin)
+                else:
+                    GPIO.setup(self.pin, GPIO.IN)
+                    logger.debug("[LOCAL GPIO] pin %d → High-Impedance (Inactive)", self.pin)
 
     def _trigger_http_unlock(self) -> None:
         import urllib.request

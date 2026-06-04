@@ -41,7 +41,7 @@ MIN_ENCODINGS_PER_PERSON = 3   # samples captured per enrollment session
 # Door Lock Hardware (Raspberry Pi GPIO)
 # ---------------------------------------------------------------------------
 GPIO_LOCK_PIN = 18         # BCM pin connected to relay/solenoid gate
-LOCK_ACTIVE_HIGH = True    # True if HIGH = unlocked; False if LOW = unlocked
+LOCK_ACTIVE_HIGH = False    # True if HIGH = unlocked; False if LOW = unlocked
 UNLOCK_DURATION_SEC = 3    # seconds the lock stays open after auth success
 REMOTE_GPIO_IP = os.getenv("REMOTE_GPIO_IP", None)  # Set to Raspberry Pi IP to control GPIO over WiFi
 
