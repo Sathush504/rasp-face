@@ -18,7 +18,7 @@ import cv2
 import face_recognition
 import numpy as np
 
-from config import FACE_MODEL, FACE_TOLERANCE, PROCESS_SCALE
+from config import FACE_MODEL, FACE_TOLERANCE, PROCESS_SCALE, LIVENESS_ENABLED, EYE_AR_THRESH
 
 logger = logging.getLogger(__name__)
 
@@ -113,10 +113,13 @@ class FaceRecognizer:
                 self._decay_counters()
                 return [], [], None
 
-            # Calculate landmarks for liveness detection
-            landmarks_list = face_recognition.face_landmarks(rgb_small, locations)
-            db_encodings, db_names = self._db.get_all_encodings_and_names()
+            # Calculate scale and landmarks on full resolution for precision
             scale = int(1 / PROCESS_SCALE)
+            full_locations = [(int(loc[0] * scale), int(loc[1] * scale), int(loc[2] * scale), int(loc[3] * scale)) for loc in locations]
+            rgb_full = cv2.cvtColor(bgr_frame, cv2.COLOR_BGR2RGB)
+            landmarks_list = face_recognition.face_landmarks(rgb_full, full_locations)
+            
+            db_encodings, db_names = self._db.get_all_encodings_and_names()
 
             face_boxes: List[Tuple[int, int, int, int]] = []
             face_labels: List[str] = []
@@ -144,19 +147,20 @@ class FaceRecognizer:
                 if name != "Unknown" and idx < len(landmarks_list):
                     landmarks = landmarks_list[idx]
                     ear = self._calculate_ear(landmarks)
+                    logger.info("Liveness [%s] -> EAR: %.3f (Threshold: %.2f)", name, ear, EYE_AR_THRESH)
                     
                     # Track state machine
                     current_state = self._blink_state.get(name, "OPEN")
-                    if ear < 0.20:  # Closed threshold
+                    if ear < EYE_AR_THRESH:  # Closed threshold
                         self._blink_state[name] = "CLOSED"
-                    elif ear >= 0.20 and current_state == "CLOSED":
+                    elif ear >= EYE_AR_THRESH and current_state == "CLOSED":
                         self._blink_state[name] = "OPEN"
                         self._blink_counted[name] = True
-                        logger.info("Blink detected for '%s'! EAR: %.2f", name, ear)
+                        logger.info("✓ Liveness confirmed: Blink detected for '%s'!", name)
 
                 # Set label text
                 label_name = name
-                if name != "Unknown":
+                if name != "Unknown" and LIVENESS_ENABLED:
                     if not self._blink_counted.get(name, False):
                         label_name = f"{name} (Blink to Unlock)"
                 face_labels.append(label_name)
@@ -197,7 +201,7 @@ class FaceRecognizer:
             return None
 
         # Check if they have blinked (liveness check)
-        if not self._blink_counted.get(name, False):
+        if LIVENESS_ENABLED and not self._blink_counted.get(name, False):
             # Keep match counter at confirmation threshold so we don't drop out of matching
             with self._lock:
                 self._match_counter[name] = self._confirm_frames

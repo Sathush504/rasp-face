@@ -77,3 +77,5 @@ FALLBACK_PIN = os.getenv("FALLBACK_PIN", "9999")  # Fallback PIN to unlock via B
 USER_SCHEDULES = {
     "Guest": ("09:00", "17:00")
 }
+LIVENESS_ENABLED = True
+EYE_AR_THRESH = 0.22   # Threshold below which eyes are considered closed
