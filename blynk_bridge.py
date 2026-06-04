@@ -63,6 +63,7 @@ class BlynkBridge:
         self,
         auth_token: str,
         on_remote_unlock: Callable[[], None],
+        on_command: Optional[Callable[[str], None]] = None,
         vpin_unlock: Union[int, str] = 0,
         vpin_status: Union[int, str] = 1,
         vpin_log: Union[int, str] = 2,
@@ -70,6 +71,7 @@ class BlynkBridge:
     ):
         self._auth = auth_token
         self._on_remote_unlock = on_remote_unlock
+        self._on_command = on_command
         self._vpin_unlock = vpin_unlock
         self._vpin_status = vpin_status
         self._vpin_log = vpin_log
@@ -210,6 +212,25 @@ class BlynkBridge:
                 except Exception as exc:
                     logger.warning("Malformed unlock payload: %s — %s", payload, exc)
 
+            # Check if this is an incoming command from the Terminal widget
+            is_log_match = False
+            if isinstance(self._vpin_log, int):
+                try:
+                    is_log_match = (int(ds_str.lstrip("Vv")) == self._vpin_log)
+                except ValueError:
+                    pass
+            else:
+                is_log_match = (
+                    ds_str.lower() == self._vpin_log.lower() or
+                    ds_str.lstrip("Vv").lower() == self._vpin_log.lstrip("Vv").lower() or
+                    (self._vpin_log.lower() == "access log" and ds_str.lower() in ("v2", "v2_log")) or
+                    (self._vpin_log.lower() in ("v2", "v2_log") and ds_str.lower() == "access log")
+                )
+
+            if is_log_match and self._on_command:
+                logger.info("Received command from Blynk terminal: %s", payload)
+                self._on_command(payload.strip())
+
     def _publish_vpin(self, vpin, value) -> None:
         if not self._connected or self._client is None:
             return
@@ -226,3 +247,30 @@ class BlynkBridge:
             self._client.publish(topic, payload, qos=1)
         except Exception as exc:
             logger.warning("Failed to publish V%d: %s" if isinstance(vpin, int) else "Failed to publish %s: %s", vpin, exc)
+
+    def trigger_event(self, event_code: str) -> None:
+        """Trigger a Blynk push notification/event log asynchronously via HTTP API."""
+        if not self._auth:
+            return
+        threading.Thread(
+            target=self._call_log_event_api,
+            args=(event_code,),
+            daemon=True
+        ).start()
+
+    def _call_log_event_api(self, event_code: str) -> None:
+        import urllib.request
+        # Blynk API expects the token and event code
+        url = (
+            f"https://blynk.cloud/external/api/logEvent"
+            f"?token={self._auth}&code={event_code}"
+        )
+        try:
+            req = urllib.request.Request(url, method="GET")
+            with urllib.request.urlopen(req, timeout=5.0) as response:
+                if response.status == 200:
+                    logger.info("Successfully triggered Blynk event: %s", event_code)
+                else:
+                    logger.warning("Blynk event API returned status: %d", response.status)
+        except Exception as exc:
+            logger.warning("Failed to call Blynk event API: %s", exc)

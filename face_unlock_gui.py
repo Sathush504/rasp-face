@@ -154,6 +154,7 @@ class FaceUnlockApp:
         # ------------------------------------------------------------------
         # Subsystem initialisation
         # ------------------------------------------------------------------
+        self._startup_time = time.time()
         self._db = FaceDatabase(DATABASE_FILE)
         self._door = DoorLock(
             pin=GPIO_LOCK_PIN,
@@ -167,6 +168,7 @@ class FaceUnlockApp:
         self._blynk = BlynkBridge(
             auth_token=BLYNK_AUTH_TOKEN,
             on_remote_unlock=self._remote_unlock_requested,
+            on_command=self._on_blynk_command_received,
             vpin_unlock=VPIN_UNLOCK_BUTTON,
             vpin_status=VPIN_STATUS_LED,
             vpin_log=VPIN_ACCESS_LOG,
@@ -190,6 +192,7 @@ class FaceUnlockApp:
         # ------------------------------------------------------------------
         self._enroll_session: Optional[EnrollmentSession] = None
         self._enroll_overlay_active = False
+        self._enroll_is_remote = False
 
         # ------------------------------------------------------------------
         # Build UI
@@ -458,11 +461,23 @@ class FaceUnlockApp:
         )
         if not name or not name.strip():
             return
+        self._enroll_is_remote = False
         self._enroll_session = EnrollmentSession(name.strip(), self._db)
         self._enroll_frame.pack(fill=tk.X, pady=4)
         self._enroll_label.config(text=f"Enrolling: {name.strip()}")
         self._update_status_bar(f"Enrollment started for '{name.strip()}' — look at the camera")
         logger.info("Enrollment session started for '%s'.", name.strip())
+
+    def _start_remote_enrollment(self, name: str) -> None:
+        name = name.strip()
+        self._enroll_is_remote = True
+        self._enroll_session = EnrollmentSession(name, self._db)
+        self._enroll_frame.pack(fill=tk.X, pady=4)
+        self._enroll_label.config(text=f"Enrolling: {name}")
+        self._update_status_bar(f"Remote enrollment started for '{name}' — look at the camera")
+        logger.info("Remote enrollment session started for '%s'.", name)
+        ts = datetime.datetime.now().strftime("%H:%M:%S")
+        self._blynk.send_access_event(f"[{ts}] ⏳ Remote enrollment started for '{name}' - look at the camera!")
 
     def _handle_enrollment_frame(self, bgr) -> None:
         result = self._enroll_session.feed_frame(bgr)
@@ -481,16 +496,20 @@ class FaceUnlockApp:
             self._enroll_frame.pack_forget()
             self._refresh_people_list()
             self._update_status_bar(result.message)
+            ts = datetime.datetime.now().strftime("%H:%M:%S")
 
             if result.success:
                 name = result.message.split("'")[1] if "'" in result.message else "?"
                 self._access_log.log_event(
-                    "ENROLLMENT", name=name, source="admin"
+                    "ENROLLMENT", name=name, source="blynk" if self._enroll_is_remote else "admin"
                 )
-                self._blynk.send_access_event(f"[ENROLL] {name}")
-                messagebox.showinfo("Enrollment Complete", result.message, parent=self.window)
+                self._blynk.send_access_event(f"[{ts}] ✓ ENROLL COMPLETE: {name}")
+                if not self._enroll_is_remote:
+                    messagebox.showinfo("Enrollment Complete", result.message, parent=self.window)
             else:
-                messagebox.showwarning("Enrollment Failed", result.message, parent=self.window)
+                self._blynk.send_access_event(f"[{ts}] ✗ ENROLL FAILED: {result.message}")
+                if not self._enroll_is_remote:
+                    messagebox.showwarning("Enrollment Failed", result.message, parent=self.window)
 
     # -----------------------------------------------------------------------
     # Remove person
@@ -551,6 +570,82 @@ class FaceUnlockApp:
         ts = datetime.datetime.now().strftime("%H:%M:%S")
         self._blynk.send_access_event(f"[{ts}] ✓ UNLOCKED: Blynk Switch")
 
+    def _on_blynk_command_received(self, cmd_text: str) -> None:
+        """Called from the Blynk MQTT thread — must be marshalled to Tk thread."""
+        self.window.after_idle(self._process_blynk_command, cmd_text)
+
+    def _process_blynk_command(self, cmd_text: str) -> None:
+        cmd = cmd_text.lower().strip()
+        ts = datetime.datetime.now().strftime("%H:%M:%S")
+
+        if cmd == "help":
+            help_msg = (
+                f"[{ts}] --- COMMANDS ---\n"
+                "  help   - Show commands\n"
+                "  status - System state\n"
+                "  log    - Last 5 events\n"
+                "  unlock - Open door\n"
+                "  lock   - Secure door"
+            )
+            self._blynk.send_access_event(help_msg)
+
+        elif cmd == "status":
+            state = "UNLOCKED" if self._door.is_unlocked else "LOCKED"
+            num_users = len(self._db.list_people())
+            uptime_sec = int(time.time() - self._startup_time)
+            uptime_str = f"{uptime_sec // 60}m {uptime_sec % 60}s"
+
+            status_msg = (
+                f"[{ts}] --- STATUS ---\n"
+                f"  Lock: {state}\n"
+                f"  Enrolled: {num_users} users\n"
+                f"  Uptime: {uptime_str}"
+            )
+            self._blynk.send_access_event(status_msg)
+
+        elif cmd == "log":
+            recent = self._access_log.read_recent(n=5)
+            log_lines = []
+            for event in reversed(recent):
+                log_ts = event.get("timestamp", "").split("T")[-1][:8]
+                evt_type = event.get("event", "")
+                if evt_type == "ACCESS_GRANTED":
+                    name = event.get("name", "Unknown")
+                    log_lines.append(f"  {log_ts} ✓ Grant: {name}")
+                elif evt_type == "UNAUTHORIZED_ACCESS":
+                    log_lines.append(f"  {log_ts} ✗ Alert: Unknown")
+                else:
+                    log_lines.append(f"  {log_ts} • {evt_type}")
+
+            log_msg = f"[{ts}] --- RECENT LOGS ---\n" + "\n".join(log_lines)
+            self._blynk.send_access_event(log_msg)
+
+        elif cmd == "unlock":
+            self._door.unlock(triggered_by="blynk_cmd")
+            self._access_log.log_event("REMOTE_UNLOCK", source="blynk_cmd")
+            self._append_log("Remote unlock via Blynk command", tag="blynk")
+            self._update_status_bar("Door unlocked via Blynk terminal")
+            self._blynk.send_access_event(f"[{ts}] ✓ UNLOCKED: Blynk Terminal")
+
+        elif cmd == "lock":
+            self._door.lock()
+            self._access_log.log_event("REMOTE_LOCK", source="blynk_cmd")
+            self._append_log("Remote lock via Blynk command", tag="blynk")
+            self._update_status_bar("Door locked via Blynk terminal")
+            self._blynk.send_access_event(f"[{ts}] 🔒 LOCKED: Blynk Terminal")
+
+        elif cmd.startswith("enroll:"):
+            enroll_name = cmd_text[7:].strip()
+            if not enroll_name:
+                self._blynk.send_access_event(f"[{ts}] ✗ Error: Name cannot be empty. Usage: enroll:Name")
+            elif self._enroll_session is not None:
+                self._blynk.send_access_event(f"[{ts}] ✗ Error: Enrollment session already active.")
+            else:
+                self._start_remote_enrollment(enroll_name)
+
+        else:
+            self._blynk.send_access_event(f"[{ts}] Unknown command. Type 'help' for commands.")
+
     # -----------------------------------------------------------------------
     # Clear database
     # -----------------------------------------------------------------------
@@ -595,6 +690,7 @@ class FaceUnlockApp:
             self._access_log.log_event(
                 "UNAUTHORIZED_ACCESS", source="face"
             )
+            self._blynk.trigger_event("unauthorized_access")
 
     # -----------------------------------------------------------------------
     # Lock state callback (from DoorLock — may be any thread)
