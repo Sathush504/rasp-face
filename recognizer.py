@@ -113,12 +113,7 @@ class FaceRecognizer:
                 self._decay_counters()
                 return [], [], None
 
-            # Calculate scale and landmarks on full resolution for precision
             scale = int(1 / PROCESS_SCALE)
-            full_locations = [(int(loc[0] * scale), int(loc[1] * scale), int(loc[2] * scale), int(loc[3] * scale)) for loc in locations]
-            rgb_full = cv2.cvtColor(bgr_frame, cv2.COLOR_BGR2RGB)
-            landmarks_list = face_recognition.face_landmarks(rgb_full, full_locations)
-            
             db_encodings, db_names = self._db.get_all_encodings_and_names()
 
             face_boxes: List[Tuple[int, int, int, int]] = []
@@ -143,20 +138,33 @@ class FaceRecognizer:
                             name = db_names[best]
                             confidence = float(1.0 - distances[best])
 
-                # Blink detection logic for known faces
-                if name != "Unknown" and idx < len(landmarks_list):
-                    landmarks = landmarks_list[idx]
-                    ear = self._calculate_ear(landmarks)
-                    logger.info("Liveness [%s] -> EAR: %.3f (Threshold: %.2f)", name, ear, EYE_AR_THRESH)
-                    
-                    # Track state machine
-                    current_state = self._blink_state.get(name, "OPEN")
-                    if ear < EYE_AR_THRESH:  # Closed threshold
-                        self._blink_state[name] = "CLOSED"
-                    elif ear >= EYE_AR_THRESH and current_state == "CLOSED":
-                        self._blink_state[name] = "OPEN"
-                        self._blink_counted[name] = True
-                        logger.info("✓ Liveness confirmed: Blink detected for '%s'!", name)
+                # Blink detection logic for known faces (only run if liveness check is required)
+                if LIVENESS_ENABLED and name != "Unknown" and not self._blink_counted.get(name, False):
+                    rgb_full = cv2.cvtColor(bgr_frame, cv2.COLOR_BGR2RGB)
+                    h, w, _ = rgb_full.shape
+                    t_safe = max(0, top)
+                    b_safe = min(h, bottom)
+                    l_safe = max(0, left)
+                    r_safe = min(w, right)
+
+                    if b_safe > t_safe and r_safe > l_safe:
+                        face_crop = rgb_full[t_safe:b_safe, l_safe:r_safe]
+                        crop_loc = [(0, face_crop.shape[1], face_crop.shape[0], 0)]
+                        crop_landmarks_list = face_recognition.face_landmarks(face_crop, crop_loc)
+                        
+                        if crop_landmarks_list:
+                            landmarks = crop_landmarks_list[0]
+                            ear = self._calculate_ear(landmarks)
+                            logger.info("Liveness [%s] -> EAR: %.3f (Threshold: %.2f)", name, ear, EYE_AR_THRESH)
+                            
+                            # Track state machine
+                            current_state = self._blink_state.get(name, "OPEN")
+                            if ear < EYE_AR_THRESH:  # Closed threshold
+                                self._blink_state[name] = "CLOSED"
+                            elif ear >= EYE_AR_THRESH and current_state == "CLOSED":
+                                self._blink_state[name] = "OPEN"
+                                self._blink_counted[name] = True
+                                logger.info("✓ Liveness confirmed: Blink detected for '%s'!", name)
 
                 # Set label text
                 label_name = name
