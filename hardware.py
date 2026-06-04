@@ -77,7 +77,7 @@ class DoorLock:
     """
 
     def __init__(self, pin: int, active_high: bool = True,
-                 unlock_duration: float = 3.0):
+                 unlock_duration: float = 3.0, remote_ip: str = None):
         self.pin = pin
         self.active_high = active_high
         self.unlock_duration = unlock_duration
@@ -86,9 +86,38 @@ class DoorLock:
         self._state_lock = threading.Lock()
         self._on_state_change_callback = None
 
-        GPIO.setmode(GPIO.BCM)
-        GPIO.setup(self.pin, GPIO.OUT, initial=self._locked_signal())
-        logger.info("DoorLock initialised on GPIO pin %d.", self.pin)
+        # Load from config if not explicitly passed
+        if remote_ip is None:
+            try:
+                from config import REMOTE_GPIO_IP
+                self.remote_ip = REMOTE_GPIO_IP
+            except ImportError:
+                self.remote_ip = None
+        else:
+            self.remote_ip = remote_ip
+
+        self._pi = None
+        if self.remote_ip:
+            logger.info("DoorLock initializing in REMOTE GPIO mode on Pi at %s", self.remote_ip)
+            try:
+                import pigpio
+                self._pi = pigpio.pi(self.remote_ip)
+                if not self._pi.connected:
+                    logger.warning("Could not connect to remote pigpiod daemon at %s. Falling back to local/simulation mode.", self.remote_ip)
+                    self._pi = None
+                else:
+                    self._pi.set_mode(self.pin, pigpio.OUTPUT)
+            except Exception as exc:
+                logger.warning("Failed to initialize remote pigpio to %s: %s. Falling back to local/simulation mode.", self.remote_ip, exc)
+                self._pi = None
+
+        if not self._pi:
+            GPIO.setmode(GPIO.BCM)
+            GPIO.setup(self.pin, GPIO.OUT, initial=self._locked_signal())
+            logger.info("DoorLock initialised on local GPIO pin %d.", self.pin)
+        else:
+            self._set_gpio(unlocked=False)
+            logger.info("DoorLock initialised on remote GPIO pin %d.", self.pin)
 
     # ------------------------------------------------------------------
     # Public API
@@ -127,8 +156,15 @@ class DoorLock:
     def cleanup(self) -> None:
         """Release GPIO resources. Call on application exit."""
         self._cancel_relock_timer()
-        GPIO.cleanup()
-        logger.info("GPIO cleaned up.")
+        if self._pi:
+            try:
+                self._pi.stop()
+                logger.info("Remote GPIO connection closed.")
+            except Exception:
+                pass
+        else:
+            GPIO.cleanup()
+            logger.info("GPIO cleaned up.")
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -141,7 +177,15 @@ class DoorLock:
 
     def _set_gpio(self, unlocked: bool) -> None:
         signal = self._unlocked_signal() if unlocked else self._locked_signal()
-        GPIO.output(self.pin, GPIO.HIGH if signal else GPIO.LOW)
+        if self._pi:
+            val = 1 if signal else 0
+            try:
+                self._pi.write(self.pin, val)
+                logger.debug("[REMOTE GPIO] pin %d → %d", self.pin, val)
+            except Exception as exc:
+                logger.warning("Remote GPIO write failed: %s", exc)
+        else:
+            GPIO.output(self.pin, GPIO.HIGH if signal else GPIO.LOW)
 
     def _auto_relock(self) -> None:
         with self._state_lock:
