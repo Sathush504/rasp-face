@@ -448,7 +448,7 @@ class FaceUnlockApp:
             frame_to_process = None
             with self._processing_lock:
                 if self._pending_frame is not None:
-                    frame_to_process = self._pending_frame.copy()
+                    frame_to_process = self._pending_frame
                     self._pending_frame = None
             
             if frame_to_process is not None:

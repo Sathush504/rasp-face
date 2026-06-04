@@ -9,6 +9,7 @@ Wraps the ``face_recognition`` library with:
 
 import datetime
 import logging
+import math
 import threading
 from dataclasses import dataclass, field
 from enum import Enum, auto
@@ -33,7 +34,7 @@ class AuthResult(Enum):
     ERROR = auto()          # processing error
 
 
-@dataclass
+@dataclass(slots=True)
 class RecognitionEvent:
     timestamp: datetime.datetime
     result: AuthResult
@@ -307,13 +308,22 @@ class FaceRecognizer:
         if not left_eye or not right_eye or len(left_eye) < 6 or len(right_eye) < 6:
             return 0.0
 
-        def distance(p1, p2):
-            return np.sqrt((p1[0] - p2[0])**2 + (p1[1] - p2[1])**2)
+        # Optimize by using C-level math.hypot to calculate distances without function/numpy overhead
+        l1_5 = math.hypot(left_eye[1][0] - left_eye[5][0], left_eye[1][1] - left_eye[5][1])
+        l2_4 = math.hypot(left_eye[2][0] - left_eye[4][0], left_eye[2][1] - left_eye[4][1])
+        l0_3 = math.hypot(left_eye[0][0] - left_eye[3][0], left_eye[0][1] - left_eye[3][1])
 
-        ear_left = (distance(left_eye[1], left_eye[5]) + distance(left_eye[2], left_eye[4])) / (2.0 * distance(left_eye[0], left_eye[3]))
-        ear_right = (distance(right_eye[1], right_eye[5]) + distance(right_eye[2], right_eye[4])) / (2.0 * distance(right_eye[0], right_eye[3]))
+        r1_5 = math.hypot(right_eye[1][0] - right_eye[5][0], right_eye[1][1] - right_eye[5][1])
+        r2_4 = math.hypot(right_eye[2][0] - right_eye[4][0], right_eye[2][1] - right_eye[4][1])
+        r0_3 = math.hypot(right_eye[0][0] - right_eye[3][0], right_eye[0][1] - right_eye[3][1])
 
-        return float((ear_left + ear_right) / 2.0)
+        if l0_3 == 0.0 or r0_3 == 0.0:
+            return 0.0
+
+        ear_left = (l1_5 + l2_4) / (2.0 * l0_3)
+        ear_right = (r1_5 + r2_4) / (2.0 * r0_3)
+
+        return (ear_left + ear_right) / 2.0
 
     def _apply_clahe(self, rgb_img: np.ndarray) -> np.ndarray:
         try:
