@@ -533,6 +533,8 @@ class FaceUnlockApp:
         self._door.unlock(triggered_by="admin")
         self._access_log.log_event("REMOTE_UNLOCK", source="admin")
         self._append_log("Manual unlock by admin", tag="info")
+        ts = datetime.datetime.now().strftime("%H:%M:%S")
+        self._blynk.send_access_event(f"[{ts}] ✓ UNLOCKED: Admin GUI")
 
     # -----------------------------------------------------------------------
     # Remote unlock (from Blynk — runs in Blynk's MQTT thread)
@@ -546,6 +548,8 @@ class FaceUnlockApp:
         self._access_log.log_event("REMOTE_UNLOCK", source="blynk")
         self._append_log("Remote unlock via Blynk", tag="blynk")
         self._update_status_bar("Door unlocked via Blynk app")
+        ts = datetime.datetime.now().strftime("%H:%M:%S")
+        self._blynk.send_access_event(f"[{ts}] ✓ UNLOCKED: Blynk Switch")
 
     # -----------------------------------------------------------------------
     # Clear database
