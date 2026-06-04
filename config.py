@@ -55,10 +55,10 @@ BLYNK_SERVER = "blynk.cloud"
 BLYNK_PORT = 443           # TLS
 
 # Virtual Pin mapping (configure matching Datastreams in Blynk Console)
-VPIN_UNLOCK_BUTTON = "v0"  # V0 — Button widget
-VPIN_STATUS_LED = "v1"        # V1 — LED widget
-VPIN_ACCESS_LOG = "v2"        # V2 — Terminal/Text widget
-VPIN_LAST_USER = "v3"          # V3 — Label widget
+VPIN_UNLOCK_BUTTON = "Unlock Button"  # V0 — Button widget
+VPIN_STATUS_LED = "Lock Status"        # V1 — LED widget
+VPIN_ACCESS_LOG = "Access Log"        # V2 — Terminal/Text widget
+VPIN_LAST_USER = "Last User"          # V3 — Label widget
 
 # ---------------------------------------------------------------------------
 # Logging / Audit
