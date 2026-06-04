@@ -268,6 +268,7 @@ class FaceUnlockApp:
         # ------------------------------------------------------------------
         self._build_ui()
         self._access_log.log_event("STARTUP", source="system")
+        self._blynk.trigger_event("system_startup", "Smart Door Lock System is now Online and Monitoring.")
         self._update_status_bar(f"System ready  |  {self._db.person_count()} person(s) enrolled")
         self._poll_camera()
 
@@ -657,6 +658,7 @@ class FaceUnlockApp:
         self._append_log("Manual unlock by admin", tag="info")
         ts = datetime.datetime.now().strftime("%H:%M:%S")
         self._blynk.send_access_event(f"[{ts}] ✓ UNLOCKED: Admin GUI")
+        self._blynk.trigger_event("admin_unlock", "Door manually unlocked by Admin from the GUI dashboard.")
 
     # -----------------------------------------------------------------------
     # Remote unlock (from Blynk — runs in Blynk's MQTT thread)
@@ -672,6 +674,7 @@ class FaceUnlockApp:
         self._update_status_bar("Door unlocked via Blynk app")
         ts = datetime.datetime.now().strftime("%H:%M:%S")
         self._blynk.send_access_event(f"[{ts}] ✓ UNLOCKED: Blynk Switch")
+        self._blynk.trigger_event("remote_unlock", "Door unlocked remotely from Blynk Mobile App.")
 
     def _on_blynk_command_received(self, cmd_text: str) -> None:
         """Called from the Blynk MQTT thread — must be marshalled to Tk thread."""
@@ -751,6 +754,7 @@ class FaceUnlockApp:
             self._append_log("Remote unlock via Blynk command", tag="blynk")
             self._update_status_bar("Door unlocked via Blynk terminal")
             self._blynk.send_access_event(f"[{ts}] ✓ UNLOCKED: Blynk Terminal")
+            self._blynk.trigger_event("remote_unlock", "Door unlocked remotely via Blynk Terminal command.")
 
         elif cmd == "lock":
             self._door.lock()
@@ -800,6 +804,7 @@ class FaceUnlockApp:
                 self._append_log("Door unlocked via fallback PIN", tag="blynk")
                 self._update_status_bar("Door unlocked via fallback PIN")
                 self._blynk.send_access_event(f"[{ts}] ✓ UNLOCKED: Fallback PIN")
+                self._blynk.trigger_event("remote_unlock", "Door unlocked remotely via fallback PIN.")
             else:
                 self._blynk.send_access_event(f"[{ts}] ✗ Error: Invalid PIN.")
 
@@ -866,6 +871,7 @@ class FaceUnlockApp:
             )
             # Unlock physical lock
             self._door.unlock(triggered_by=event.name or "face")
+            self._blynk.trigger_event("access_granted", f"Access Granted: {event.name} ({event.confidence:.0%}) unlocked the door.")
 
         elif event.result == AuthResult.UNKNOWN:
             msg = f"[{ts}] ✗ ALERT: Unknown person detected!"
@@ -887,7 +893,7 @@ class FaceUnlockApp:
                 "UNAUTHORIZED_ACCESS", source="face",
                 extra={"snapshot": filename}
             )
-            self._blynk.trigger_event("unauthorized_access")
+            self._blynk.trigger_event("unauthorized_access", "ALERT: Unknown person detected at the door!")
 
     # -----------------------------------------------------------------------
     # Lock state callback (from DoorLock — may be any thread)
