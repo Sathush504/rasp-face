@@ -523,6 +523,11 @@ class FaceUnlockApp:
 
     def _draw_overlays(self, frame, boxes, labels) -> None:
         import numpy as np  # inline to keep top-level lean
+        
+        show_blink_prompt = False
+        show_calib_prompt = False
+        prompt_name = ""
+        
         for (top, right, bottom, left), name in zip(boxes, labels):
             colour = (0, 200, 80) if name != "Unknown" else (255, 60, 60)
             cv2.rectangle(frame, (left, top), (right, bottom), colour, 2)
@@ -533,6 +538,43 @@ class FaceUnlockApp:
                 cv2.FONT_HERSHEY_DUPLEX, 0.55,
                 (255, 255, 255), 1
             )
+            
+            if "(Blink to Unlock)" in name:
+                show_blink_prompt = True
+                prompt_name = name.split(" (")[0]
+            elif "(Calibrating...)" in name:
+                show_calib_prompt = True
+                prompt_name = name.split(" (")[0]
+                
+        # Draw central HUD banner on the camera frame and update status bar
+        h, w, _ = frame.shape
+        if self._door.is_unlocked():
+            self._update_status_bar("Access granted. Door is UNLOCKED.")
+        else:
+            if show_blink_prompt:
+                # Translucent Orange/Cyan banner at top
+                overlay = frame.copy()
+                cv2.rectangle(overlay, (0, 0), (w, 40), (255, 120, 0), cv2.FILLED)
+                cv2.addWeighted(overlay, 0.65, frame, 0.35, 0, frame)
+                cv2.putText(
+                    frame, f"WELCOME {prompt_name.upper()} - BLINK TO UNLOCK",
+                    (15, 26), cv2.FONT_HERSHEY_DUPLEX, 0.6,
+                    (255, 255, 255), 2
+                )
+                self._update_status_bar(f"✓ {prompt_name} detected. Please BLINK to unlock.")
+            elif show_calib_prompt:
+                # Translucent Yellow/Amber banner at top
+                overlay = frame.copy()
+                cv2.rectangle(overlay, (0, 0), (w, 40), (0, 160, 255), cv2.FILLED)
+                cv2.addWeighted(overlay, 0.65, frame, 0.35, 0, frame)
+                cv2.putText(
+                    frame, f"CALIBRATING EYES FOR {prompt_name.upper()}...",
+                    (15, 26), cv2.FONT_HERSHEY_DUPLEX, 0.6,
+                    (255, 255, 255), 2
+                )
+                self._update_status_bar(f"● {prompt_name} detected. Calibrating eyes...")
+            else:
+                self._update_status_bar(f"System ready  |  {self._db.person_count()} person(s) enrolled")
 
     def _render_frame(self, bgr) -> None:
         rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
