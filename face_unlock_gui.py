@@ -548,7 +548,7 @@ class FaceUnlockApp:
                 
         # Draw central HUD banner on the camera frame and update status bar
         h, w, _ = frame.shape
-        if self._door.is_unlocked():
+        if self._door.is_unlocked:
             self._update_status_bar("Access granted. Door is UNLOCKED.")
         else:
             if show_blink_prompt:
