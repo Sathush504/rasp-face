@@ -297,10 +297,6 @@ class FaceRecognizer:
                     del self._blink_state[name]
                 if name in self._blink_counted:
                     del self._blink_counted[name]
-                if name in self._open_ear_history:
-                    del self._open_ear_history[name]
-                if name in self._dynamic_threshold:
-                    del self._dynamic_threshold[name]
 
     def _calculate_ear(self, landmarks: dict) -> float:
         left_eye = landmarks.get("left_eye")
