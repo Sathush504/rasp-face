@@ -251,6 +251,7 @@ class FaceUnlockApp:
         self._enroll_overlay_active = False
         self._enroll_is_remote = False
         self._last_bgr = None
+        self._last_intruder_alert_time = 0.0
 
         # ------------------------------------------------------------------
         # Background Face Processing Thread
@@ -879,21 +880,25 @@ class FaceUnlockApp:
             self._update_status_bar("Unknown face detected!")
             self._blynk.send_access_event(msg)
             
-            # Save snapshot of the intruder
-            intruders_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "intruders")
-            os.makedirs(intruders_dir, exist_ok=True)
-            timestamp_str = event.timestamp.strftime("%Y%m%d_%H%M%S")
-            filename = f"intruder_{timestamp_str}.jpg"
-            filepath = os.path.join(intruders_dir, filename)
-            if hasattr(self, "_last_bgr") and self._last_bgr is not None:
-                cv2.imwrite(filepath, self._last_bgr)
-                logger.info("Saved intruder snapshot to %s", filepath)
-            
-            self._access_log.log_event(
-                "UNAUTHORIZED_ACCESS", source="face",
-                extra={"snapshot": filename}
-            )
-            self._blynk.trigger_event("unauthorized_access", "ALERT: Unknown person detected at the door!")
+            now = time.time()
+            if now - self._last_intruder_alert_time >= 60.0:  # 60 seconds cooldown
+                self._last_intruder_alert_time = now
+                
+                # Save snapshot of the intruder
+                intruders_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "intruders")
+                os.makedirs(intruders_dir, exist_ok=True)
+                timestamp_str = event.timestamp.strftime("%Y%m%d_%H%M%S")
+                filename = f"intruder_{timestamp_str}.jpg"
+                filepath = os.path.join(intruders_dir, filename)
+                if hasattr(self, "_last_bgr") and self._last_bgr is not None:
+                    cv2.imwrite(filepath, self._last_bgr)
+                    logger.info("Saved intruder snapshot to %s", filepath)
+                
+                self._access_log.log_event(
+                    "UNAUTHORIZED_ACCESS", source="face",
+                    extra={"snapshot": filename}
+                )
+                self._blynk.trigger_event("unauthorized_access", "ALERT: Unknown person detected at the door!")
 
     # -----------------------------------------------------------------------
     # Lock state callback (from DoorLock — may be any thread)

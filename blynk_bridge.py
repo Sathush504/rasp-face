@@ -272,17 +272,28 @@ class BlynkBridge:
     def _call_log_event_api(self, event_code: str, message: str) -> None:
         import urllib.request
         import urllib.parse
+        import urllib.error
         # Blynk API expects the token, event code, and optional urlencoded description
         safe_msg = urllib.parse.quote(message)
+        # Match regional server for direct routing without redirects (e.g. sgp1.blynk.cloud)
+        host = BLYNK_MQTT_BROKER if BLYNK_MQTT_BROKER else "blynk.cloud"
         url = (
-            f"https://blynk.cloud/external/api/logEvent"
+            f"https://{host}/external/api/logEvent"
             f"?token={self._auth}&code={event_code}&description={safe_msg}"
         )
         try:
             req = urllib.request.Request(url, method="GET")
             with urllib.request.urlopen(req, timeout=5.0) as response:
-                # read to fetch response and get status
                 body = response.read()
                 logger.info("Successfully triggered Blynk event API: %s (status: %d)", event_code, response.status)
+        except urllib.error.HTTPError as exc:
+            try:
+                err_body = exc.read().decode("utf-8")
+                if "too many log events" in err_body.lower():
+                    logger.warning("Blynk notification blocked: Daily limit of 100 log events exceeded for this device.")
+                else:
+                    logger.warning("Blynk event API HTTP Error %d: %s | Response: %s", exc.code, exc.reason, err_body)
+            except Exception:
+                logger.warning("Failed to call Blynk event API (HTTP Error %d: %s)", exc.code, exc.reason)
         except Exception as exc:
             logger.warning("Failed to call Blynk event API: %s", exc)
